@@ -2,6 +2,7 @@
 //! separate metrics/health router.
 
 pub mod auth;
+mod forms;
 mod pages;
 mod views;
 
@@ -23,6 +24,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::Config;
 use crate::db::Db;
+use crate::metrics::Metrics;
 use auth::AuthMode;
 
 #[derive(Clone)]
@@ -223,6 +225,13 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(pages::index))
         .route("/search", get(pages::search))
+        .route("/packages", post(forms::create))
+        .route("/packages/new", get(forms::new))
+        .route("/packages/{id}", get(pages::detail).post(forms::update))
+        .route("/packages/{id}/edit", get(forms::edit))
+        .route("/packages/{id}/status", post(forms::set_status))
+        .route("/packages/{id}/archive", post(forms::archive))
+        .route("/packages/{id}/unarchive", post(forms::unarchive))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
@@ -239,9 +248,29 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `/healthz` and `/readyz`, served on their own port.
-pub fn ops_router(db: Db) -> Router {
+/// `/metrics`, `/healthz` and `/readyz`, served on their own port.
+pub fn ops_router(db: Db, metrics: Arc<Metrics>) -> Router {
     Router::new()
+        .route(
+            "/metrics",
+            get(move || {
+                let metrics = metrics.clone();
+                async move {
+                    // The collector queries the database.
+                    match tokio::task::spawn_blocking(move || metrics.encode()).await {
+                        Ok(text) => (
+                            [(
+                                header::CONTENT_TYPE,
+                                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                            )],
+                            text,
+                        )
+                            .into_response(),
+                        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                    }
+                }
+            }),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .route(
             "/readyz",

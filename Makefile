@@ -49,5 +49,6 @@ visual-docker-update: ## `make visual-update` in the CI image: commit the new PN
 
 helm-lint: ## Lint and render the chart
 	$(HELM) lint deploy/helm/lastmile --set oidc.issuer=https://idp.example.com
-	$(HELM) template lastmile deploy/helm/lastmile --set oidc.issuer=https://idp.example.com >/dev/null
+	$(HELM) template lastmile deploy/helm/lastmile --set oidc.issuer=https://idp.example.com \
+	  --set serviceMonitor.enabled=true >/dev/null
 	HELM=$(HELM) deploy/helm/tests/render.sh

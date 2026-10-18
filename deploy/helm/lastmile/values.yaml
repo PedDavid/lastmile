@@ -34,6 +34,9 @@ persistence:
   # Kept on `helm uninstall` so the packages survive a reinstall.
   keep: true
 
+# A package with no news for this long needs attention.
+staleAfter: 7d
+
 # Development only: every visitor is an admin.
 insecureDevAuth: false
 
@@ -49,6 +52,11 @@ ingress:
   annotations: {}
   host: parcels.example.com
   tls: []
+
+serviceMonitor:
+  enabled: false
+  interval: 60s
+  labels: {}
 
 # Numeric IDs are required: with runAsNonRoot the kubelet cannot verify a
 # non-numeric image USER. 65532 is distroless's `nonroot`; fsGroup makes the

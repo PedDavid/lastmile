@@ -87,3 +87,60 @@ async fn command_palette() {
         .unwrap();
     assert_screenshot(&ui.page, "command-palette").await;
 }
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn filtered_needs_attention() {
+    let ui = open("/", &[]).await;
+    ui.page
+        .locator(".filter-chip[data-filter=attention]")
+        .click(None)
+        .await
+        .unwrap();
+    // Wait for htmx to swap in the filtered list and the updated chips.
+    expect(
+        ui.page
+            .locator(".filter-chip[data-filter=attention][data-active=true]"),
+    )
+    .to_be_visible()
+    .await
+    .unwrap();
+    assert_screenshot(&ui.page, "filtered-attention").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn detail_ready_for_pickup() {
+    let ui = open("/packages/1", &[]).await;
+    assert_screenshot(&ui.page, "detail-pickup").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn detail_phone_dark() {
+    let ui = open_phone("/packages/2", &[("lastmile_theme", "dark")]).await;
+    assert_screenshot(&ui.page, "detail-phone-dark").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn status_dialog() {
+    let ui = open("/packages/5", &[]).await;
+    ui.page
+        .locator("[data-dialog-open=status-dialog]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("#status-title"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "status-dialog").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn add_package_phone() {
+    let ui = open_phone("/packages/new", &[]).await;
+    assert_screenshot(&ui.page, "add-package-phone").await;
+}

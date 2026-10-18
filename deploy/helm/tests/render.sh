@@ -11,12 +11,16 @@ render() {
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # An exposed UI Service never carries the unauthenticated metrics port.
-out=$(render --set service.type=LoadBalancer)
+out=$(render --set service.type=LoadBalancer --set serviceMonitor.enabled=true)
 ui=$(yq 'select(.kind == "Service" and .metadata.name == "lastmile")' <<<"$out")
 [[ $(yq '.spec.type' <<<"$ui") == LoadBalancer ]] || fail "UI Service type not applied"
 [[ $(yq '[.spec.ports[].name] | join(",")' <<<"$ui") == http ]] || fail "UI Service exposes more than http"
 metrics=$(yq 'select(.kind == "Service" and .metadata.name == "lastmile-metrics")' <<<"$out")
 [[ $(yq '.spec.type' <<<"$metrics") == ClusterIP ]] || fail "metrics Service is not ClusterIP"
+[[ $(yq '.spec.ports[0].name' <<<"$metrics") == metrics ]] || fail "metrics Service has no metrics port"
+sm=$(yq 'select(.kind == "ServiceMonitor")' <<<"$out")
+[[ $(yq '.spec.selector.matchLabels."app.kubernetes.io/component"' <<<"$sm") == metrics ]] \
+  || fail "ServiceMonitor does not select the metrics Service"
 
 # The database is on the chart's PVC, or on an existing one (then no PVC is
 # created), and one pod at a time opens it.

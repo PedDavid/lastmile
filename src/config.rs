@@ -38,6 +38,10 @@ pub struct Config {
     #[arg(long, env = "LASTMILE_DATABASE", default_value = "/data/lastmile.db")]
     pub database: PathBuf,
 
+    /// A package with no news for this long needs attention.
+    #[arg(long, env = "LASTMILE_STALE_AFTER", default_value = "7d", value_parser = parse_duration)]
+    pub stale_after: SignedDuration,
+
     #[command(flatten)]
     pub auth: AuthConfig,
 
@@ -116,6 +120,9 @@ impl Config {
     pub fn check(&self) -> Result<(), String> {
         if self.auth.session_ttl.is_negative() || self.auth.session_ttl.is_zero() {
             return Err("--session-ttl must be positive".into());
+        }
+        if self.stale_after.is_negative() || self.stale_after.is_zero() {
+            return Err("--stale-after must be positive".into());
         }
         Ok(())
     }

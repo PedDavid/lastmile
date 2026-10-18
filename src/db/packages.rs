@@ -141,6 +141,90 @@ pub fn insert_event(
     Ok(conn.last_insert_rowid())
 }
 
+/// Replaces a package's details (everything but its status, which only
+/// changes through [`set_status`]) and records who changed them.
+pub fn update(
+    conn: &mut Connection,
+    id: i64,
+    p: &NewPackage,
+    description: &str,
+    now: Timestamp,
+) -> rusqlite::Result<bool> {
+    let tx = conn.transaction()?;
+    let n = tx.execute(
+        "UPDATE packages SET title = ?2, merchant = ?3, recipient = ?4, courier = ?5, \
+         tracking_number = ?6, order_ref = ?7, tracking_url = ?8, eta_from = ?9, eta_to = ?10, \
+         code = ?11, code_kind = ?12, code_expires_at = ?13, pickup_name = ?14, \
+         pickup_address = ?15, pickup_hours = ?16, notes = ?17 WHERE id = ?1",
+        params![
+            id,
+            p.title,
+            p.merchant,
+            p.recipient,
+            p.courier,
+            p.tracking_number,
+            p.order_ref,
+            p.tracking_url,
+            p.eta_from.map(secs),
+            p.eta_to.map(secs),
+            p.code,
+            p.code_kind.map(CodeKind::as_str),
+            p.code_expires_at.map(secs),
+            p.pickup_point.name,
+            p.pickup_point.address,
+            p.pickup_point.hours,
+            p.notes,
+        ],
+    )?;
+    if n == 1 {
+        insert_event(&tx, id, now, None, description, Source::Manual)?;
+    }
+    tx.commit()?;
+    Ok(n == 1)
+}
+
+/// Sets a package's status and adds it to the timeline.
+pub fn set_status(
+    conn: &mut Connection,
+    id: i64,
+    status: Status,
+    source: Source,
+    at: Timestamp,
+    description: &str,
+) -> rusqlite::Result<bool> {
+    let tx = conn.transaction()?;
+    let n = tx.execute(
+        "UPDATE packages SET status = ?2, status_source = ?3, status_at = ?4 WHERE id = ?1",
+        params![id, status.as_str(), source.as_str(), secs(at)],
+    )?;
+    if n == 1 {
+        insert_event(&tx, id, at, Some(status), description, source)?;
+    }
+    tx.commit()?;
+    Ok(n == 1)
+}
+
+/// Distinct non-empty values of a column, for the form's suggestions.
+pub fn distinct(conn: &Connection, column: Suggest) -> rusqlite::Result<Vec<String>> {
+    let column = match column {
+        Suggest::Courier => "courier",
+        Suggest::Recipient => "recipient",
+        Suggest::Merchant => "merchant",
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT {column} FROM packages WHERE {column} IS NOT NULL AND {column} != '' \
+         ORDER BY {column} COLLATE NOCASE"
+    ))?;
+    stmt.query_map([], |r| r.get(0))?.collect()
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Suggest {
+    Courier,
+    Recipient,
+    Merchant,
+}
+
 /// A package's timeline, newest first.
 pub fn events(conn: &Connection, package_id: i64) -> rusqlite::Result<Vec<Event>> {
     let mut stmt = conn.prepare(
@@ -195,9 +279,33 @@ mod tests {
         assert_eq!(got.pickup_point.name.as_deref(), Some("Locker"));
         assert_eq!(got.created_at, now);
 
+        let first = db.blocking(|c| events(c, id)).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].status, Some(Status::Announced));
+
+        let mut edit = p.clone();
+        edit.title = "Trail shoes".into();
+        edit.status = Status::Delivered; // ignored: status has its own path
+        assert!(
+            db.blocking(|c| update(c, id, &edit, "Edited", now))
+                .unwrap()
+        );
+        let got = db.blocking(|c| get(c, id)).unwrap().unwrap();
+        assert_eq!(got.title, "Trail shoes");
+        assert_eq!(got.status, Status::Announced);
+
+        let later = now + jiff::SignedDuration::from_hours(1);
+        db.blocking(|c| set_status(c, id, Status::Delivered, Source::Manual, later, "Collected"))
+            .unwrap();
+        let got = db.blocking(|c| get(c, id)).unwrap().unwrap();
+        assert_eq!((got.status, got.status_at), (Status::Delivered, later));
         let events = db.blocking(|c| events(c, id)).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].status, Some(Status::Announced));
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].description, "Collected");
+        assert_eq!(
+            db.blocking(|c| distinct(c, Suggest::Courier)).unwrap(),
+            ["CTT"]
+        );
 
         db.blocking(|c| set_archived(c, id, Some(now))).unwrap();
         assert!(db.blocking(|c| list(c, Scope::Active)).unwrap().is_empty());

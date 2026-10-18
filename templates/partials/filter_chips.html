@@ -1,0 +1,12 @@
+<div id="filter-chips" class="flex flex-wrap gap-2" role="group" aria-label="Show"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <label class="filter-chip" data-active="{{ filters.show.is_empty() }}">
+    <input type="radio" name="show" value="" class="sr-only" {% if filters.show.is_empty() %}checked{% endif %}>
+    All <span class="text-muted-foreground">{{ active }}</span>
+  </label>
+  {% for c in counts %}
+  <label class="filter-chip" data-filter="{{ c.name }}" data-active="{{ c.active }}">
+    <input type="radio" name="show" value="{{ c.name }}" class="sr-only" {% if c.active %}checked{% endif %}>
+    {% if c.name == "attention" %}<span class="[&>svg]:size-3.5 text-(--status-exception)">{% include "icons/triangle-alert.svg" %}</span>{% endif %}{{ c.label }} <span class="text-muted-foreground">{{ c.count }}</span>
+  </label>
+  {% endfor %}
+</div>

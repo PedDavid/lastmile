@@ -1,7 +1,9 @@
 //! Packages, their status and their timeline.
 
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
+
+use crate::duration::humanize;
 
 /// Where a package is. Shown grouped into the three filters of
 /// [`Filter`]; `exception` only raises the *needs attention* flag.
@@ -221,6 +223,48 @@ pub struct Package {
     pub archived_at: Option<Timestamp>,
 }
 
+/// How close to its end a pickup has to be to need attention.
+pub const PICKUP_ENDING: SignedDuration = SignedDuration::from_hours(48);
+
+impl Package {
+    /// Why someone should look at this package, if they should: a problem
+    /// reported, no news for `stale_after`, or a pickup about to end.
+    pub fn attention(&self, now: Timestamp, stale_after: SignedDuration) -> Option<String> {
+        if self.archived_at.is_some() || self.status == Status::Delivered {
+            return None;
+        }
+        if self.status == Status::Exception {
+            return Some("Problem reported".into());
+        }
+        if self.status == Status::ReadyForPickup
+            && let Some(end) = self.code_expires_at
+        {
+            let left = end.duration_since(now);
+            if left.is_negative() {
+                return Some("Pickup period over".into());
+            }
+            if left <= PICKUP_ENDING {
+                return Some(format!("Pickup ends in {}", humanize(left)));
+            }
+        }
+        let quiet = now.duration_since(self.status_at);
+        if quiet >= stale_after {
+            return Some(format!("No news for {}", humanize(quiet)));
+        }
+        None
+    }
+
+    /// The filter chip this package is counted under (besides *needs
+    /// attention*, which is a flag).
+    pub fn filter(&self) -> Option<Filter> {
+        if self.archived_at.is_some() {
+            Some(Filter::Archived)
+        } else {
+            self.status.filter()
+        }
+    }
+}
+
 /// Everything about a package except what the database assigns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewPackage {
@@ -318,6 +362,51 @@ mod tests {
             assert_eq!(s.filter().is_none(), s == Status::Exception, "{s:?}");
             assert_eq!(s.rank().is_none(), s == Status::Exception, "{s:?}");
         }
+    }
+
+    #[test]
+    fn attention() {
+        let now: Timestamp = "2026-10-18T12:00:00Z".parse().unwrap();
+        let week = SignedDuration::from_hours(7 * 24);
+        let ago = |h| now - SignedDuration::from_hours(h);
+        let p = |status, status_at| Package {
+            status,
+            status_at,
+            ..sample(now)
+        };
+        assert_eq!(p(Status::InTransit, ago(24)).attention(now, week), None);
+        assert_eq!(
+            p(Status::InTransit, ago(9 * 24))
+                .attention(now, week)
+                .as_deref(),
+            Some("No news for 9d")
+        );
+        assert_eq!(
+            p(Status::Exception, ago(1)).attention(now, week).as_deref(),
+            Some("Problem reported")
+        );
+        // Delivered and archived packages are done, however old.
+        assert_eq!(p(Status::Delivered, ago(900)).attention(now, week), None);
+        let archived = Package {
+            archived_at: Some(now),
+            ..p(Status::InTransit, ago(900))
+        };
+        assert_eq!(archived.attention(now, week), None);
+        assert_eq!(archived.filter(), Some(Filter::Archived));
+
+        let pickup = |hours_left| Package {
+            code_expires_at: Some(now + SignedDuration::from_hours(hours_left)),
+            ..p(Status::ReadyForPickup, ago(1))
+        };
+        assert_eq!(pickup(72).attention(now, week), None);
+        assert_eq!(
+            pickup(30).attention(now, week).as_deref(),
+            Some("Pickup ends in 1d")
+        );
+        assert_eq!(
+            pickup(-1).attention(now, week).as_deref(),
+            Some("Pickup period over")
+        );
     }
 
     #[test]
