@@ -5,6 +5,7 @@ pub mod messages;
 pub mod migrations;
 pub mod packages;
 pub mod rules;
+pub mod settings;
 pub mod tokens;
 
 use std::path::Path;

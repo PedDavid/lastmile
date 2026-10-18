@@ -66,6 +66,10 @@
         <input type="checkbox" class="input" name="add_sample" value="1" {% if form.add_sample.is_some() %}checked{% endif %}>
         Keep this message as a sample (checked on every save)
       </label>
+      <label class="flex items-center gap-2 text-sm text-muted-foreground">
+        <input type="checkbox" class="input" name="keep_original" value="1" {% if form.keep_original.is_some() %}checked{% endif %}>
+        Store the sample as it is: by default it is saved redacted (the household values replaced)
+      </label>
       {% if needs_confirm %}
       <label class="flex items-center gap-2 text-sm font-medium text-destructive">
         <input type="checkbox" class="input" name="confirm" value="1">

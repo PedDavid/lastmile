@@ -1,11 +1,12 @@
 //! Drafting a rule with an LLM, from one message no rule matched.
 //!
-//! Only the text an admin has read and sent goes out. The draft is a JSON
-//! object (strict schema where the server supports it), converted to a
-//! [`RuleDef`] and then *validated locally* before anyone sees it: it must
-//! compile, match the message and not change what other rules' samples
-//! read. A draft that fails goes back to the model with the problems, up to
-//! [`MAX_RETRIES`] times.
+//! Only the redacted message goes out. The draft is a JSON object (strict
+//! schema where the server supports it), converted to a [`RuleDef`] and then
+//! *validated locally* before anyone sees it: it must compile, match the
+//! message (the redacted one, whose results can safely be sent back, and the
+//! original, which is only ever run here) and not change what other rules'
+//! samples read. A draft that fails goes back to the model with the
+//! problems, up to [`MAX_RETRIES`] times.
 
 use std::collections::BTreeMap;
 
@@ -17,8 +18,9 @@ use super::engine::{self, Input, Outcome};
 use super::schema::{Field, Match, RuleDef, Set};
 use super::{check_samples, with_candidate};
 use crate::db::rules::{Sample, StoredRule};
-use crate::llm::{Client, Message, Role};
+use crate::llm::{Client, LlmError, Message, Role};
 use crate::model::{Channel, CodeKind, Status};
+use crate::redact::{Household, find_leak, redact_known};
 
 /// Automatic retries after the first answer.
 pub const MAX_RETRIES: usize = 3;
@@ -209,10 +211,10 @@ broader one.\n\n\
 Regex dialect: Rust's `regex` crate. There is no look-around and no backreferences. Use `(?i)` \
 for case. Messages come with or without accents (ã/a, ç/c, é/e): write `[aã]`-style classes, or \
 avoid accented letters. Escape nothing twice: your JSON string is the pattern.\n\n\
-The message is one example of its kind: other messages of the same kind have other names, \
-addresses, numbers and codes. Write patterns that work for any value in their place (for an \
-address, something like `[^.\\n]+`; for a code, its shape such as `\\d{6}`, not the digits you \
-see), and never put a person's name, address or phone number in a pattern.\n",
+Personal data in the message has been replaced by placeholders such as ‹NAME_1›, ‹ADDRESS_1›, \
+‹PHONE_1›, ‹TOKEN_1› or ‹CODE:dddddd›. Real messages have real values there. Never match or \
+extract a placeholder: write patterns that work for any value in its place (for an address, \
+something like `[^.\\n]+`; for a code, its shape such as `\\d{6}`, not the digits you see).\n",
     );
     if !existing.is_empty() {
         p.push_str("\nRules this household already has for the same courier, to follow their style and priorities:\n");
@@ -235,14 +237,17 @@ as in this JSON Schema:\n",
 
 /// What to draft a rule from.
 pub struct Request<'a> {
-    /// The text of the message the admin reviewed: what is sent.
-    pub message: &'a str,
-    pub sender: Option<&'a str>,
+    /// The message as it came in: only ever read here.
+    pub original: &'a str,
+    pub original_sender: Option<&'a str>,
+    /// The same, redacted: what is sent.
+    pub redacted: &'a str,
     pub channel: Channel,
     /// What the admin says it is ("Paack out for delivery, the 4 digits are the code").
     pub hint: &'a str,
     pub stored: &'a [StoredRule],
     pub samples: &'a [Sample],
+    pub household: &'a Household,
     pub sent_at: Timestamp,
 }
 
@@ -262,21 +267,22 @@ pub struct Drafted {
     pub attempts: usize,
     /// What was still wrong with the last draft after the retries.
     pub problems: Vec<String>,
-    /// Why no draft was made at all (the model couldn't be reached).
+    /// Why no draft was made at all (the model couldn't be reached, or a
+    /// household value was about to be sent).
     pub error: Option<String>,
     pub calls: Vec<CallStat>,
 }
 
-fn user_message(req: &Request) -> String {
+fn user_message(req: &Request, sender: Option<&str>) -> String {
     let mut m = format!("Channel: {}\n", req.channel.as_str());
-    if let Some(s) = req.sender {
+    if let Some(s) = sender {
         m.push_str(&format!("Sender: {s}\n"));
     }
     let hint = req.hint.trim();
     if !hint.is_empty() {
         m.push_str(&format!("What this message is: {hint}\n"));
     }
-    m.push_str(&format!("\nMessage:\n<<<\n{}\n>>>\n", req.message.trim()));
+    m.push_str(&format!("\nMessage:\n<<<\n{}\n>>>\n", req.redacted.trim()));
     m
 }
 
@@ -287,17 +293,20 @@ fn problems_with(def: &RuleDef, req: &Request, rule_id: &str) -> Vec<String> {
         Ok(c) => c,
         Err(errors) => return errors,
     };
-    let outcome = engine::evaluate(
-        std::slice::from_ref(&compiled),
-        &Input {
-            channel: req.channel,
-            sender: req.sender,
-            text: req.message,
-            sent_at: req.sent_at,
-        },
-    );
+    let sender_redacted = req.original_sender.map(|s| redact_known(s, req.household));
+    let run = |text: &str, sender: Option<&str>| {
+        engine::evaluate(
+            std::slice::from_ref(&compiled),
+            &Input {
+                channel: req.channel,
+                sender,
+                text,
+                sent_at: req.sent_at,
+            },
+        )
+    };
     let mut problems = Vec::new();
-    match outcome {
+    match run(req.redacted, sender_redacted.as_deref()) {
         Outcome::Unmatched => {
             problems.push(
                 "The rule does not match the message: check `channels`, `sender`, `all` and `none` against it."
@@ -316,7 +325,26 @@ fn problems_with(def: &RuleDef, req: &Request, rule_id: &str) -> Vec<String> {
                 }
             ));
         }
-        Outcome::Matched { .. } => {}
+        Outcome::Matched { fields, .. } => {
+            for (name, value) in &fields {
+                if value.contains('‹') {
+                    problems.push(format!(
+                        "The pattern for `{name}` captures a redacted placeholder: capture real text only (anything that is not a placeholder)."
+                    ));
+                }
+            }
+        }
+    }
+    if problems.is_empty()
+        && !matches!(
+            run(req.original, req.original_sender),
+            Outcome::Matched { .. }
+        )
+    {
+        problems.push(
+            "The rule matches the redacted message but not the real one: it relies on parts that were redacted. Match what stays the same in every message of this kind."
+                .into(),
+        );
     }
     if problems.is_empty() {
         let (before, after) = with_candidate(req.stored, compiled);
@@ -361,12 +389,22 @@ pub async fn draft(client: &Client, req: &Request<'_>) -> Drafted {
         .take(3)
         .map(|r| &r.def)
         .collect();
+    let sender = req.original_sender.map(|s| redact_known(s, req.household));
     let mut messages = vec![
         Message::new(Role::System, system_prompt(client, &courier_rules)),
-        Message::new(Role::User, user_message(req)),
+        Message::new(Role::User, user_message(req, sender.as_deref())),
     ];
     let mut out = Drafted::default();
     for _ in 0..=MAX_RETRIES {
+        // Last line of defence: whatever the text has been through, a
+        // household value in it stops the request.
+        if let Some(kind) = messages
+            .iter()
+            .find_map(|m| find_leak(&m.content, req.household))
+        {
+            out.error = Some(LlmError::Leak(kind.label()).to_string());
+            return out;
+        }
         out.attempts += 1;
         let completion = match client.complete(&messages, SCHEMA_NAME, &schema()).await {
             Ok(c) => c,
@@ -413,11 +451,22 @@ pub async fn draft(client: &Client, req: &Request<'_>) -> Drafted {
 mod tests {
     use super::*;
     use crate::db::rules::{Origin, StoredRule};
+    use crate::redact::redact;
     use clap::Parser;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, Request as WmRequest, Respond, ResponseTemplate};
 
-    const MESSAGE: &str = "Paack: Olá, a sua encomenda PCK7Q2W9D será entregue hoje. Código de entrega 5527. Dúvidas: 912 345 678.";
+    const ORIGINAL: &str = "Paack: Olá Ana Ferreira, a sua encomenda PCK7Q2W9D será entregue hoje em Avenida da Liberdade 10, 1250-096 Lisboa. Código de entrega 5527. Dúvidas: 912 345 678.";
+
+    fn household() -> Household {
+        Household {
+            names: vec!["Ana Ferreira".into(), "Ana".into()],
+            addresses: vec!["Avenida da Liberdade 10".into()],
+            postcodes: vec!["1250-096".into()],
+            phones: vec!["912345678".into()],
+            emails: vec![],
+        }
+    }
 
     fn reply(def: Value) -> Value {
         json!({
@@ -477,15 +526,19 @@ mod tests {
         ])
         .unwrap();
         let client = Client::from_config(&cfg.llm).unwrap().unwrap();
+        let h = household();
+        let redacted = redact(ORIGINAL, &h, Default::default());
         let out = draft(
             &client,
             &Request {
-                message: MESSAGE,
-                sender: None,
+                original: ORIGINAL,
+                original_sender: None,
+                redacted: &redacted.text,
                 channel: Channel::Share,
                 hint: "Paack out for delivery, the 4 digits are the code",
                 stored,
                 samples: &[],
+                household: &h,
                 sent_at: "2026-10-18T12:00:00Z".parse().unwrap(),
             },
         )
@@ -517,14 +570,40 @@ mod tests {
             def.extract[&Field::Code].as_deref(),
             Some("(?i)c[oó]digo de entrega (?P<v>\\d{4})")
         );
-        // What was sent is the reviewed text, and says what the admin said.
+        // What was sent is redacted, and says what the admin said.
         let prompt = serde_json::to_string(&sent[0]).unwrap();
         assert!(
-            prompt.contains("PCK7Q2W9D") && prompt.contains("912 345 678"),
+            prompt.contains("‹NAME_1›") && prompt.contains("‹ADDRESS_1›"),
             "{prompt}"
         );
         assert!(prompt.contains("the 4 digits are the code"));
         assert_eq!(sent[0]["response_format"]["json_schema"]["strict"], true);
+    }
+
+    #[tokio::test]
+    async fn nothing_personal_is_sent_even_across_retries() {
+        let mut bad = good();
+        bad["extract"] = json!([{"field": "code", "pattern": "(?P<v>\\d{4})"}]);
+        let (out, sent) = run(vec![ok(bad), ok(good())], &[]).await;
+        assert_eq!(out.attempts, 2);
+        let h = household();
+        for request in &sent {
+            let body = serde_json::to_string(request).unwrap();
+            assert_eq!(find_leak(&body, &h), None, "{body}");
+            for secret in [
+                "Ferreira",
+                "Liberdade",
+                "1250-096",
+                "912 345 678",
+                "912345678",
+                "PCK7Q2W9D",
+            ] {
+                // The tracking number is meant to stay; the rest never leaves.
+                if secret != "PCK7Q2W9D" {
+                    assert!(!body.contains(secret), "{secret} leaked: {body}");
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -565,7 +644,7 @@ mod tests {
         // The conversation keeps its earlier turns.
         assert_eq!(sent[3]["messages"].as_array().unwrap().len(), 8);
         for f in feedback {
-            assert!(!f.contains("PCK7Q2W9D") && !f.contains("5527"), "{f}");
+            assert!(!f.contains("Avenida") && !f.contains("5527"), "{f}");
         }
     }
 
@@ -642,21 +721,25 @@ mod tests {
         let mut greedy = good();
         greedy["priority"] = json!(500);
         greedy["all"] = json!(["(?i)paack"]);
+        let h = household();
         let def = serde_json::from_value::<DraftJson>(greedy)
             .unwrap()
             .into_def()
             .0;
+        let redacted = redact(ORIGINAL, &h, Default::default());
         let samples = [sample];
         let stored = [stored];
         let problems = problems_with(
             &def,
             &Request {
-                message: MESSAGE,
-                sender: None,
+                original: ORIGINAL,
+                original_sender: None,
+                redacted: &redacted.text,
                 channel: Channel::Share,
                 hint: "",
                 stored: &stored,
                 samples: &samples,
+                household: &h,
                 sent_at: "2026-10-18T12:00:00Z".parse().unwrap(),
             },
             "draft",
