@@ -1,0 +1,399 @@
+# lastmile — implementation plan
+
+A self-hosted list of the packages my household is expecting: who is
+delivering each one, where it is, and the code to give the courier or the
+locker. Packages come from emails and text messages that are forwarded or
+shared to the app. Rules turn them into packages, and where a courier can be
+queried the app follows the package from then on.
+
+Same stack and look as [dominium](https://github.com/PedDavid/dominium) and
+[clavium](https://github.com/PedDavid/clavium). Start M0 by copying their
+skeleton (CI, Dockerfile, Helm chart, Basecoat/Tailwind/htmx assets, themes,
+⌘K palette, OIDC from clavium) rather than writing it again.
+
+## 1. Decisions
+
+| Topic | Decision |
+|---|---|
+| Scope | Incoming packages for one household: status, courier, tracking number, delivery or pickup code, pickup point, ETA. No outgoing shipments, no letters |
+| Couriers | **CTT / CTT Expresso** and **Paack** first. Others go through the same rule and adapter traits later |
+| Platform | Kubernetes, single replica, same stack as dominium/clavium (Rust, axum, askama, Tailwind v4, Basecoat, htmx) |
+| State | **SQLite on a PVC.** Unlike the other two apps, packages are data the app creates, so it can't live in git or ConfigMaps. One file, embedded migrations, backed up with the volume |
+| Input | Email forwarded to a dedicated mailbox (IMAP poll), text shared from the phone (Android: PWA share target; iOS: Apple Shortcut), paste box in the UI, manual entry. No SMS forwarding |
+| Parsing | **Deterministic rules** run on every message. An LLM is never on the recurring path: it is only used to **write a new rule** from a message no rule matched, after PII redaction, and the rule is reviewed and saved by a person |
+| Tracking | Courier adapters poll active packages where the courier can be queried. Messages also move the status (e.g. "out for delivery"). Manual override always wins |
+| Auth | OIDC as in clavium. Every household member who logs in can view and add packages; admins (group claim) can also edit rules and use the LLM. The iOS Shortcut uses per-user ingest tokens |
+| Alerting | Prometheus metrics plus an optional `PrometheusRule` (e.g. waiting at a pickup point for too long). No notifier in the app |
+
+## 2. What already exists, and why it isn't used
+
+Checked in October 2026; re-check anything marked *unverified* during the spikes.
+
+| Option | Why not (as the primary path) |
+|---|---|
+| Home Assistant core `17track` / `aftership` | Depend on paid or quota-limited aggregator accounts; AfterShip no longer has a useful free tier; HA's integrations only expose counts and states, not codes |
+| [parcel-ha](https://github.com/jmdevita/parcel-ha) (Parcel app) | Needs a Parcel premium subscription (Apple only), strict rate limits (about 20 req/h), and depends on Parcel supporting the courier |
+| `parcelsapp.com` integration | Free tier is about 10 parcels a month |
+| Mail and Packages (HACS), Paket Tracker, PostNL, Informed Delivery | Email parsers for US, German and Dutch carriers. None handle CTT or Paack, and the codes aren't extracted |
+| [jupitern/ctt](https://packagist.org/packages/jupitern/ctt) (PHP) | Not usable as is, but it proves CTT's public object search page can be scraped. Use it as a reference for the CTT adapter |
+| Aggregator APIs: 17TRACK, Ship24, TrackingMore | 17TRACK is sold as yearly quota packs (unverified); Ship24's free tier is 10 shipments a month; TrackingMore is paid. Paack coverage is unverified everywhere. Could become an optional adapter (§6) |
+
+The common gap: none of them extract **the code to give the courier**, and
+the codes are the main reason for this app. They only arrive in the courier's
+messages, so message parsing is the core of the app and the courier APIs are
+an extra.
+
+## 3. Architecture
+
+```
+ email (forward / filter) ──▶ dedicated mailbox ◀── IMAP poll ──┐
+ Android share ──▶ PWA share target (GET /share) ───────────────┤
+ iOS share sheet ──▶ Shortcut ── POST /api/ingest (token) ──────┤
+ UI paste box / manual form ────────────────────────────────────┤
+                                                                ▼
+                    ┌──────────────────────────────────────────────────┐
+                    │ lastmile (single binary, single replica)         │
+                    │  messages ──▶ rule engine ──▶ package upsert     │      ┌──────────────────┐
+                    │                   │ no match                     │      │ CTT object search│
+                    │                   ▼                              │◀────▶│ Paack tracking   │
+                    │                inbox ──▶ redact ──▶ LLM ─────────┼────▶ │ (adapters, poll) │
+                    │                            draft rule ──▶ review │      └──────────────────┘
+                    │  SQLite (PVC) · axum UI · /metrics               │      ┌──────────────────┐
+                    └──────────────────────────────────────────────────┘────▶ │ Claude API       │
+                                       │ /metrics                             │ (admins, opt-in) │
+                                       ▼                                      └──────────────────┘
+                             Prometheus ──▶ Alertmanager
+```
+
+- **One replica**, SQLite in WAL mode on a `ReadWriteOnce` PVC, Deployment
+  strategy `Recreate`. No leader election.
+- **Background tasks** in the same process: IMAP poller, courier poller,
+  retention sweep.
+- **Metrics** are computed from the database on scrape (the counts are small).
+
+## 4. Data model
+
+```
+packages      id, title, merchant, recipient (household member, optional),
+              courier, tracking_number, order_ref, tracking_url,
+              status, status_source, status_at, eta_from, eta_to,
+              code, code_kind (delivery | pickup), code_expires_at,
+              pickup_point (name, address, hours), notes,
+              created_at, archived_at
+events        id, package_id, at, status, description, source (courier | message | manual), raw_ref
+messages      id, received_at, channel (email | share | api | paste), submitted_by,
+              sender, subject, body_text, raw (MIME or text), rule_id, rule_version,
+              result (matched | unmatched | ignored | error), package_id, purge_at
+rules         id, version, name, enabled, builtin, definition (JSON), created_by, created_at
+rule_samples  rule_id, message_id or stored redacted text, expected (JSON)
+tokens        id, user, name, hash (argon2 or SHA-256 of 32 random bytes), last_used_at, revoked_at
+```
+
+**Status.** Six internal states, shown as the three filters asked for, plus a
+flag:
+
+| Filter | Internal states |
+|---|---|
+| Preparing | `announced` (order confirmed, label created) |
+| In transit | `in_transit`, `out_for_delivery` |
+| Arrived | `ready_for_pickup` (at a locker or shop, code needed), `delivered` |
+| *Needs attention* (flag, not a state) | `exception` (failed attempt, returned, customs), or no update for `staleAfter` (default 7d), or pickup deadline near |
+
+Status only moves forward, except `exception`, and manual changes win
+whatever the order. An event with an older timestamp than the current status
+is recorded in the timeline but doesn't change the status.
+
+**Merging.** A message is linked to an existing package by
+`(courier, tracking_number)`, then by `(merchant, order_ref)`. If neither
+matches but the rule says the message is a follow-up (e.g. "ready for
+pickup" with no number), it goes to the inbox with the candidates listed for
+a one-click attach. The app never guesses.
+
+**Retention.** `delivered` packages are archived after 7 days (hidden from the
+default list, kept for search). Raw messages hold personal data, so `raw` and
+`body_text` are purged after 30 days (`--message-retention`) unless the
+message is pinned as a rule sample.
+
+## 5. Ingestion
+
+All channels produce a `message` and run the same pipeline. Every channel
+accepts plain text; email also keeps the MIME.
+
+**Email (IMAP).** Point a Gmail/Fastmail filter at a dedicated mailbox, e.g.
+`packages@<domain>`. The app polls it over IMAP every 5 minutes, using an app
+password from a Secret mounted as a file. It parses the MIME with
+`mail-parser`, converts HTML to text, and moves processed mail to a
+`lastmile/processed` folder. Forwarded emails need the *original* sender and
+subject: detect the forwarded header block (Gmail's `---------- Forwarded
+message ---------`, Outlook's `From:`/`Sent:` block) and match on those, not
+on the forwarder. No inbound SMTP and nothing exposed publicly.
+
+**Android: PWA share target.** The app ships a manifest with
+`share_target` (method **GET**, `params: {title, text, url}`) and a minimal
+service worker so it can be installed. Sharing opens `/share?text=…` (GET
+keeps the `SameSite=Lax` session cookie, which a cross-site POST would drop)
+with the text in a confirm form. The person checks it and submits, through
+the normal CSRF-protected POST. `/share` must be excluded from request
+logging, or at least have its query string stripped.
+
+**iOS: Shortcut.** The share sheet in Messages only hands over text, so
+there is no sender. A documented Shortcut takes the share sheet input and
+POSTs it to `/api/ingest` with `Authorization: Bearer <token>` (JSON
+`{text, channel: "share"}`), then shows the reply as a notification
+(*"CTT RR123456789PT – ready for pickup, code 482913"* or *"No rule
+matched – in the inbox"*). Tokens are created and revoked per user under
+*Settings → Devices* and are stored as hashes. Only the ingest endpoint
+accepts tokens.
+
+**Paste and manual.** A paste box on the inbox page (same pipeline). A manual
+form takes courier, tracking number, title and code; the courier is
+auto-detected from the tracking number format where possible.
+
+Since shared texts have no sender, **rules must be able to match on content
+alone**.
+
+## 6. Couriers
+
+```rust
+#[async_trait]
+trait Courier: Send + Sync {
+    fn id(&self) -> &'static str;                         // "ctt", "paack"
+    fn recognises(&self, tracking: &str) -> bool;         // number format, for auto-detect
+    fn tracking_url(&self, tracking: &str) -> Option<Url>;
+    async fn track(&self, tracking: &str) -> Result<Vec<CourierEvent>, TrackError>; // Unsupported if no adapter
+}
+```
+
+- **CTT / CTT Expresso.** No public developer API for recipients is known
+  (CTT has business APIs under contract, unverified). Adapter: the public
+  object search page on ctt.pt, as `jupitern/ctt` does. Map CTT's event
+  descriptions to the six states in a table with tests. Tracking numbers in
+  the UPU S10 format (`[A-Z]{2}\d{9}[A-Z]{2}`), plus CTT Expresso's own
+  formats (collect from samples).
+- **Paack.** No public API. Its messages carry a tracking link. **Spike:**
+  check whether the tracking page loads a JSON endpoint that can be called
+  with the token from the link. If not, Paack is message-only: the status
+  comes from the SMS/emails, and the detail page links to the tracking page.
+- **Polling.** Active packages with an adapter are polled every 2h (spread
+  out, one request at a time per courier, with a fixed user agent naming the
+  project URL). Back off on errors. Stop polling
+  when delivered, or after 30 days without changes (then flag as stale).
+- **Hosts are fixed in code**, as with clavium's probes.
+- **Later, optional:** an `aggregator` adapter (17TRACK or Ship24) behind the
+  same trait, with a monthly quota in the settings, for couriers without a
+  direct adapter.
+
+## 7. Rules (the "workflows")
+
+A rule is declarative data, not code: match a message, extract fields with
+regexes, set a status. Rules are stored in SQLite and versioned (a saved edit
+is a new version; messages record which version matched them). Built-in rules
+for CTT and Paack are embedded in the binary and can be disabled, not edited.
+Rules can be exported/imported as YAML, so they can be kept in git if wanted.
+
+```yaml
+id: ctt-ready-for-pickup
+name: CTT – ready for pickup (SMS)
+courier: ctt
+match:                       # all present conditions must hold
+  channels: [share, email, api, paste]
+  sender: ["*@ctt.pt", "CTT"] # optional; shared texts have none
+  all: ["(?i)disponível para levantamento"]
+  none: ["(?i)devolvid"]
+extract:                     # Rust `regex` syntax, named group `v` is the value
+  tracking_number: '\b(?P<v>[A-Z]{2}\d{9}PT)\b'
+  code: '(?i)código[^0-9]{0,20}(?P<v>\d{6})'
+  pickup_point: '(?i)em (?P<v>[^.\n]+?)(?:\.|\n|$)'
+  eta: null
+set:
+  status: ready_for_pickup
+  code_kind: pickup
+priority: 100                # highest wins; ties go to the most specific match
+samples: [msg_01J…]          # regression samples, re-run on every save
+```
+
+- **Engine.** Every enabled rule is tried, and the highest-priority match
+  wins. A required field (tracking number or order ref, unless the rule says
+  `followUp: true`) that fails to extract makes it an `error` result shown in
+  the inbox, not a silent miss. Text is normalised first (NFC, whitespace,
+  quoted-printable and HTML entities already decoded).
+- **Regex limits.** The `regex` crate has no look-around or backreferences;
+  the editor and the LLM prompt must say so. Size limits on compiled regexes.
+- **Editor (admin).** Shows the rule as YAML with a live preview: the
+  extracted fields for each sample, and every inbox message it would now
+  match. Saving runs all samples of all rules and refuses a rule that changes
+  another rule's expected result unless confirmed.
+- **Golden tests.** Built-in rules have fixtures in
+  `tests/fixtures/messages/<courier>/*.{eml,txt}` with an `*.expected.json`
+  next to each, run by `cargo test`.
+
+### 7.1 Building a rule with the LLM
+
+Only from the inbox, only for admins, only when an API key is configured.
+
+1. **Redact.** The message goes through the redaction step (§7.2). The admin
+   sees the redacted text side by side with the original and can redact more
+   by selecting text. Nothing is sent until they click *Send*.
+2. **Draft.** One call to the Claude API (model configurable; use structured
+   output / a tool with the rule's JSON Schema so the reply is always a valid
+   rule). The prompt includes the rule schema, the regex dialect limits, the
+   six states, the redacted message, the existing rules for the same courier
+   (so it follows their style and priority), and what the admin says it is
+   (*"Paack out for delivery, the 4 digits are the code"*). The model returns
+   a rule and a short explanation; it is asked to extract nothing from the
+   placeholders.
+3. **Validate locally.** Compile the rule, run it on the *original*
+   unredacted message and on all samples. Show the extracted fields. A
+   draft that doesn't compile, doesn't match the message or breaks another
+   rule's samples can be sent back with the error (at most 3 automatic
+   retries).
+4. **Review and save.** The admin edits if needed and saves; the message
+   becomes the rule's first sample (stored redacted, unless they choose to
+   keep the original) and is reprocessed, creating the package.
+
+The API key is a Secret mounted as a file (tracked in clavium, synced from
+OpenBao by ESO, as with any other key). Calls, tokens used and failures are
+counted in metrics.
+
+### 7.2 Redaction
+
+A separate module (`redact.rs`) with its own tests, used for anything sent
+outside the cluster. It replaces personal data with typed, numbered
+placeholders that keep the text's shape, e.g. `‹NAME_1›`, `‹ADDRESS_1›`,
+`‹PHONE_1›`, so the model still sees where things are.
+
+- **Known values (strongest).** Household names, addresses, postcodes,
+  phone numbers and email addresses from the settings, matched ignoring
+  case and accents.
+- **Patterns.** Email addresses, phone numbers (PT `+351` / 9 digits and
+  international), PT postcodes (`\d{4}-\d{3}`), NIF (9 digits, with the
+  check digit validated to avoid false positives), IBAN, card numbers (Luhn),
+  query strings and path tokens of URLs (keep the host), and the greeting
+  line's name (`Olá <name>`, `Caro(a) <name>`).
+- **Not redacted:** tracking numbers, delivery/pickup codes, merchant and
+  courier names, dates. They are what the rule has to find. The code is
+  replaced with a same-length placeholder of the same character class
+  (`482913` → `‹CODE:dddddd›`) only if the admin ticks it.
+- **Tests:** a no-leak test like clavium's: every configured household value
+  in a fixture must be absent from the outgoing request body (wiremock).
+
+## 8. UI
+
+Mobile first: it will mostly be opened from a phone at the door. Same
+components, themes and ⌘K palette as the other apps.
+
+- **Packages (`/`).** Filter chips *Preparing · In transit · Arrived* plus
+  *Needs attention* and *Archived*, text search, recipient filter. Cards
+  on narrow screens and a table on wide ones: title/merchant, courier badge,
+  status with relative time, ETA, and the **code in large monospace with a
+  copy button** (and pickup point when it is `ready_for_pickup`). Sorted:
+  ready for pickup and out for delivery first, then by ETA.
+- **Package detail (`/packages/{id}`).** Code, pickup point (map link),
+  tracking link, timeline of events with their source, linked messages,
+  edit/override status, archive.
+- **Inbox (`/inbox`).** Unmatched and errored messages, the paste box, and
+  per message: *Attach to package*, *Create package*, *Ignore*, *Build rule*
+  (admins).
+- **Rules (`/rules`, admin).** List with hit counts and last match, editor
+  with live preview, export/import.
+- **Settings.** Ingest tokens per user, Shortcut setup instructions, the
+  household values used for redaction (admin).
+
+## 9. Metrics and alerts
+
+Served on `:9090/metrics` with `/healthz` and `/readyz`, as in the other apps.
+
+| Metric | |
+|---|---|
+| `lastmile_packages{status, courier}` | Active (non-archived) packages |
+| `lastmile_package_ready_since_timestamp_seconds{id, courier}` | For packages waiting at a pickup point |
+| `lastmile_package_code_expiry_timestamp_seconds{id}` | When the courier says the pickup ends, if known |
+| `lastmile_inbox_messages{result}` | Unmatched / errored messages waiting |
+| `lastmile_messages_total{channel, result}` | |
+| `lastmile_courier_requests_total{courier, result}` | |
+| `lastmile_imap_last_success_timestamp_seconds` | |
+| `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | |
+
+Shipped rules: `PackageWaitingForPickup` (ready for more than 3 days, CTT
+holds items for a limited time), `PackagePickupEnding`, `PackageInboxNotEmpty`
+(info, for 1d), `LastmileImapFailing`, `LastmileDown`.
+
+## 10. Security
+
+- Same as clavium: OIDC with PKCE, encrypted session cookies, same-origin
+  `Origin` check plus CSRF token on POSTs, strict CSP (`script-src 'self'`),
+  `Cache-Control: no-store`.
+- `/api/ingest` takes bearer tokens only (no cookies), limited body size
+  (256 KiB), rate limited per token. Tokens are hashed and shown once.
+- Message bodies are personal data: never logged above DEBUG, purged on a
+  schedule, redacted before anything leaves the cluster. The LLM is off
+  unless an API key is configured.
+- Courier hosts and the LLM host are fixed in code.
+- The ingest endpoint and the UI must be reachable from the phones when
+  away from home: put the Ingress behind the usual setup (or a VPN). Only
+  `/api/ingest` needs to work without an OIDC session.
+
+## 11. Project layout
+
+```
+src/
+  main.rs  config.rs  demo.rs  metrics.rs  duration.rs
+  db/{mod,migrations}.rs   # rusqlite (bundled), WAL, embedded SQL migrations, spawn_blocking
+  model.rs                 # Package, Event, Message, Status
+  ingest/{mod,imap,email,share}.rs  # MIME → text, forwarded-header detection
+  rules/{mod,engine,schema,builtin}.rs
+  redact.rs
+  llm.rs                   # Claude API client, prompt, validation loop
+  couriers/{mod,ctt,paack}.rs
+  poller.rs                # courier polling, retention sweep
+  web/{mod,auth,pages,api,views}.rs
+rules/builtin/*.yaml       # embedded
+templates/  assets/        # as in dominium/clavium, plus manifest.webmanifest and sw.js
+tests/fixtures/messages/{ctt,paack}/
+deploy/helm/lastmile/      # Deployment (Recreate), PVC, Secrets refs, ServiceMonitor, PrometheusRule
+```
+
+Crates on top of the shared stack: `rusqlite` (bundled), `mail-parser`,
+`async-imap` (with `tokio-rustls`), `html2text`, `regex`, `scraper` (CTT
+page), `argon2` or `sha2` for tokens, `unicode-normalization`. Tests:
+`insta`, `wiremock`, and the Playwright harness from clavium.
+
+## 12. Milestones
+
+**M0 – Skeleton.** Copied stack, CI, Dockerfile, Helm chart with PVC,
+SQLite and migrations, `--demo` with sample packages in a temp database.
+
+**M1 – Useful by hand.** OIDC, packages list with filters, detail, manual
+add/edit, status override, archive, metrics. *After M1 the household can
+already keep its list, codes included.*
+
+**M2 – Messages in.** Paste box, ingest API and tokens, PWA share target,
+iOS Shortcut docs, IMAP poller, rule engine, built-in CTT and Paack rules
+with golden fixtures, inbox with attach/create/ignore, retention.
+
+**M3 – Couriers out.** Spikes on CTT and Paack tracking, adapters, poller,
+stale detection, alerts.
+
+**M4 – Building rules.** Rule editor with live preview and samples,
+redaction module and no-leak test, LLM drafting with local validation,
+export/import.
+
+**M5 – Polish.** ⌘K palette, screenshots and visual tests, Grafana
+dashboard, optional aggregator adapter.
+
+## 13. Not doing (for now)
+
+- Forwarding SMS automatically (needs an SMS gateway or an app on the phone).
+- Gmail API / OAuth: IMAP with an app password is enough.
+- Push notifications from the app: alerts go through Alertmanager.
+- The LLM extracting packages directly. It only writes rules.
+- More than one household, outgoing shipments, returns.
+
+## 14. Needed before M2
+
+- **Real samples.** A few redacted examples of each kind of CTT, CTT
+  Expresso and Paack email and SMS (announced, in transit, out for delivery,
+  ready for pickup, delivered, failed attempt), especially the ones with a
+  code. These become the fixtures; the built-in rules can't be written
+  without them.
+- **Mailbox.** Which provider and address the IMAP poller uses.
