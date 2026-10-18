@@ -19,6 +19,7 @@ use super::engine::{self, CompiledRule, Fields, Input, Outcome};
 use super::schema::RuleDef;
 use crate::db::rules::{Sample, StoredRule};
 use crate::model::Channel;
+use crate::redact::{Household, Options, redact, redact_known};
 
 pub const FORMAT: &str = "rule/v1";
 pub const BLOB_PREFIX: &str = "lastmile:rule:v1:";
@@ -243,25 +244,24 @@ pub fn check(doc: &RuleDoc) -> Result<Checked, Vec<String>> {
     Ok(Checked { compiled, samples })
 }
 
-/// The document to share for a stored rule. Its samples go as they are
-/// saved, and only those the rule still reads the same way (so every sample
-/// in the document passes when imported): the second number is how many were
-/// left out. `with_samples` false shares the rule alone.
-pub fn export(rule: &StoredRule, samples: &[Sample], with_samples: bool) -> (RuleDoc, usize) {
+/// The document to share for a stored rule. Its samples leave the app only
+/// redacted, and only those the rule still reads the same way once redacted
+/// (so every sample in the document passes when imported): the second
+/// number is how many were left out.
+pub fn export(rule: &StoredRule, samples: &[Sample], household: &Household) -> (RuleDoc, usize) {
     let compiled = engine::compile(&rule.id, rule.version, rule.def.clone()).ok();
     let mut out = Vec::new();
     let mut dropped = 0;
-    for s in samples
-        .iter()
-        .filter(|s| with_samples && s.rule_id == rule.id)
-    {
+    for s in samples.iter().filter(|s| s.rule_id == rule.id) {
+        let text = redact(&s.text, household, Options::default()).text;
+        let sender = s.sender.as_deref().map(|x| redact_known(x, household));
         let fields = compiled.as_ref().and_then(|c| {
             match engine::evaluate(
                 std::slice::from_ref(c),
                 &Input {
                     channel: s.channel,
-                    sender: s.sender.as_deref(),
-                    text: &s.text,
+                    sender: sender.as_deref(),
+                    text: &text,
                     sent_at: s.created_at,
                 },
             ) {
@@ -271,9 +271,9 @@ pub fn export(rule: &StoredRule, samples: &[Sample], with_samples: bool) -> (Rul
         });
         match fields {
             Some(expected) if out.len() < MAX_SAMPLES => out.push(SampleDoc {
-                text: s.text.clone(),
+                text,
                 channel: s.channel,
-                sender: s.sender.clone(),
+                sender,
                 expected,
             }),
             _ => dropped += 1,
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn export_keeps_only_the_rules_samples_that_still_pass() {
+    fn export_redacts_samples_and_keeps_only_those_that_still_pass() {
         let def = RuleDef::from_yaml(RULE).unwrap();
         let rule = StoredRule {
             id: "9d2c4b7e-3f51-4a58-8f0e-6c1a2d7b9e40".into(),
@@ -463,6 +463,11 @@ mod tests {
                 created_at: "2026-10-18T12:00:00Z".parse().unwrap(),
             }
         };
+        let household = Household {
+            names: vec!["Ana Ferreira".into()],
+            phones: vec!["912345678".into()],
+            ..Default::default()
+        };
         let samples = [
             sample(
                 1,
@@ -474,13 +479,19 @@ mod tests {
                 ..sample(2, "Paack: encomenda PCK1AAAA1 hoje, código 1111")
             },
         ];
-        let (doc, dropped) = export(&rule, &samples, true);
+        let (doc, dropped) = export(&rule, &samples, &household);
         assert_eq!(dropped, 0);
         assert_eq!(doc.samples.len(), 1);
-        assert_eq!(doc.samples[0].text, samples[0].text);
+        let text = &doc.samples[0].text;
+        assert!(
+            text.contains("‹NAME_1›") && text.contains("‹PHONE_1›"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Ferreira") && !text.contains("912"),
+            "{text}"
+        );
         assert_eq!(doc.samples[0].expected["tracking_number"], "PCK7Q2W9D");
-        // Asked to leave them out, the rule goes alone.
-        assert!(export(&rule, &samples, false).0.samples.is_empty());
         // What is exported imports cleanly.
         let again = parse(&doc.to_blob()).unwrap();
         assert!(check(&again).unwrap().samples_pass());

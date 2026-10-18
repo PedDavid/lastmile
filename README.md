@@ -21,18 +21,22 @@ where it is going.
 turn them into packages):
 
 - **Draft a rule with a model.** From an inbox message, an admin can ask a model
-  to write the rule. The page shows the exact text that would go out, which the
-  admin can edit (to take out names, addresses, phone numbers), and nothing is
-  sent until they click *Send*. The draft is then validated locally (it
-  compiles, matches the message, and doesn't change other rules' samples), sent
-  back to the model with the problems up to three times, and opened in the
+  to write the rule. Anything that goes out is **redacted** first: your
+  household's names, addresses, phone numbers and emails (*Settings →
+  Household*) and anything with a personal format (emails, phones, postcodes,
+  NIFs, IBANs, cards, URL tokens, greetings) become placeholders like
+  `‹NAME_1›`. The admin sees the original next to the redacted text, edits it,
+  and nothing is sent until they click *Send*. A last check refuses any request
+  that still contains a household value. The draft is then validated locally
+  (it compiles, matches the message, and doesn't change other rules' samples),
+  sent back to the model with the problems up to three times, and opened in the
   editor to review. See [docs/llm.md](docs/llm.md).
 - **Any OpenAI-compatible model**: OpenAI (Chat Completions or the Responses
   API) or a self-hosted server (Ollama, vLLM, llama.cpp, LM Studio), through
   `--llm-model` and `--llm-base-url`.
+- **Samples are stored redacted** (unless you choose to keep the original).
 - **Share rules** as a `rule/v1` document: copy the YAML, a one-line blob for
-  chat apps, or download a `.lastmile.yaml`. The samples go as they are saved,
-  so read them first, or share the rule without them.
+  chat apps, or download a `.lastmile.yaml`. Samples leave only redacted.
   **Import** from a paste or a file, with a preview (what it reads, how its
   samples fare, which inbox messages it would take, a diff if it updates a rule
   you have). Imported rules are untrusted data, bounded like any rule, and saved

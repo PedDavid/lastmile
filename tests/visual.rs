@@ -221,7 +221,7 @@ async fn settings_devices() {
 #[tokio::test]
 #[ignore = "needs a Playwright browser: make visual"]
 async fn draft_page_shows_what_would_be_sent() {
-    // Message 6 has a name, an address, a phone number and an email in it.
+    // Message 6 names the household, its address, phone and email.
     let ui = open("/rules/draft?message=6", &[]).await;
     assert_screenshot(&ui.page, "draft-rule").await;
 }
@@ -319,4 +319,15 @@ async fn import_preview_of_an_update() {
         .await
         .unwrap();
     assert_screenshot(&ui.page, "rule-import").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn settings_household() {
+    let ui = open("/settings", &[]).await;
+    ui.page
+        .evaluate_expression("document.getElementById('names').scrollIntoView({block: 'start'})")
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "settings-household").await;
 }

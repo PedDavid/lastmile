@@ -1,5 +1,5 @@
-//! The model that drafts rules (a mock OpenAI-style server), what is sent to
-//! it, and sharing rules.
+//! The model that drafts rules (a mock OpenAI-style server), redaction on
+//! the way out, the household settings, and sharing rules.
 
 mod common;
 
@@ -12,9 +12,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::*;
 use lastmile::db::messages::MessageResult;
-use lastmile::db::{messages, rules as rule_db};
+use lastmile::db::{messages, rules as rule_db, settings};
 use lastmile::ingest::{self, Incoming};
 use lastmile::model::Channel;
+use lastmile::redact::{Household, find_leak};
 
 const ORIGINAL: &str = "Paack: Olá Ana Ferreira, a sua encomenda PCK7Q2W9D da Worten será entregue hoje em Avenida da Liberdade 10, 1250-096 Lisboa. Código de entrega 5527. Dúvidas: 912 345 678 ou ana@example.com.";
 
@@ -35,6 +36,10 @@ fn get(uri: &str, cookie: &str) -> Request<Body> {
         .header(header::COOKIE, cookie)
         .body(Body::empty())
         .unwrap()
+}
+
+fn household() -> Household {
+    lastmile::demo::household()
 }
 
 fn good_draft() -> Value {
@@ -71,10 +76,12 @@ async fn mock_model(answer: Value) -> MockServer {
     server
 }
 
-/// An app with an unmatched message in the inbox and a model.
+/// An app with a household, an unmatched message in the inbox and a model.
 async fn setup(server: &MockServer) -> (Harness, String) {
     let h = harness_llm(&format!("{}/v1", server.uri()));
     let admin = session_cookie(&h.key, &session(true));
+    h.db.blocking(|c| settings::set_household(c, &household()))
+        .unwrap();
     h.db.blocking(|c| {
         ingest::ingest(
             c,
@@ -109,13 +116,17 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
             .unwrap(),
     )
     .await;
-    assert!(html.contains("What is sent"), "{html}");
-    // The message, as it is, is what the textarea holds.
+    assert!(html.contains("Original"), "{html}");
+    // The original is shown, the redaction is what the textarea holds.
     assert!(html.contains("Olá Ana Ferreira"), "{html}");
+    assert!(
+        html.contains("‹NAME_1›") && html.contains("‹ADDRESS_1›") && html.contains("‹PHONE_1›"),
+        "{html}"
+    );
     assert!(html.contains("test-model"), "{html}");
     assert!(server.received_requests().await.unwrap().is_empty());
 
-    // "Reset" throws the edits away and sends nothing either.
+    // "Redact again" with codes ticked hides the delivery code too.
     let html = body(
         h.app
             .clone()
@@ -125,20 +136,20 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
                 &[
                     ("_csrf", "csrf-token"),
                     ("message_id", "1"),
-                    ("action", "reset"),
-                    ("text", "edited"),
+                    ("action", "redact"),
+                    ("redact_codes", "1"),
                 ],
             ))
             .await
             .unwrap(),
     )
     .await;
-    assert!(html.contains("Olá Ana Ferreira"), "{html}");
+    assert!(html.contains("‹CODE:dddd›"), "{html}");
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn sending_drafts_a_rule_from_the_text_the_admin_read() {
+async fn sending_drafts_a_rule_and_leaks_nothing() {
     let server = mock_model(good_draft()).await;
     let (h, admin) = setup(&server).await;
     // What the page proposes is what the admin sends.
@@ -150,9 +161,8 @@ async fn sending_drafts_a_rule_from_the_text_the_admin_read() {
             .unwrap(),
     )
     .await;
-    let start = page.find("Text to send\">").unwrap() + "Text to send\">".len();
-    let text = html_unescape(&page[start..page[start..].find("</textarea>").unwrap() + start]);
-    assert_eq!(text, ORIGINAL);
+    let start = page.find("Redacted message\">").unwrap() + "Redacted message\">".len();
+    let redacted = html_unescape(&page[start..page[start..].find("</textarea>").unwrap() + start]);
     let res = h
         .app
         .clone()
@@ -163,7 +173,7 @@ async fn sending_drafts_a_rule_from_the_text_the_admin_read() {
                 ("_csrf", "csrf-token"),
                 ("message_id", "1"),
                 ("action", "send"),
-                ("text", &text),
+                ("redacted", &redacted),
                 ("hint", "Paack out for delivery, the 4 digits are the code"),
             ],
         ))
@@ -182,21 +192,34 @@ async fn sending_drafts_a_rule_from_the_text_the_admin_read() {
     assert!(html.contains("(?i)entregue hoje"), "{html}");
     assert!(
         html.contains("Matches"),
-        "the draft is checked against the message: {html}"
+        "the draft is checked against the original: {html}"
     );
 
-    // Exactly one request, holding the text that was read and the hint.
+    // Exactly one request, and none of the household's values were in it.
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
     let sent = String::from_utf8(requests[0].body.clone()).unwrap();
-    assert!(sent.contains("PCK7Q2W9D"), "{sent}");
+    assert_eq!(find_leak(&sent, &household()), None, "{sent}");
+    for secret in [
+        "Ferreira",
+        "Liberdade",
+        "1250-096",
+        "912 345 678",
+        "ana@example.com",
+    ] {
+        assert!(!sent.contains(secret), "{secret} was sent: {sent}");
+    }
+    assert!(
+        sent.contains("PCK7Q2W9D"),
+        "the tracking number is what the rule reads"
+    );
     assert!(sent.contains("the 4 digits are the code"));
     assert!(
         requests[0].headers.get("authorization").is_none(),
         "no key configured"
     );
 
-    // Saving keeps the message as the rule's sample.
+    // Saving keeps the real message as a redacted sample.
     let source = {
         let start = html.find("id=\"source\"").unwrap();
         let start = html[start..].find('>').unwrap() + start + 1;
@@ -222,7 +245,11 @@ async fn sending_drafts_a_rule_from_the_text_the_admin_read() {
     assert_eq!(res.status(), StatusCode::SEE_OTHER, "{}", body(res).await);
     let samples = h.db.blocking(|c| rule_db::all_samples(c)).unwrap();
     assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].text, ORIGINAL);
+    assert!(
+        samples[0].text.contains("‹NAME_1›") && !samples[0].text.contains("Ferreira"),
+        "{}",
+        samples[0].text
+    );
     assert_eq!(samples[0].expected["code"], "5527");
     // The waiting message became a package.
     assert_eq!(h.db.blocking(|c| messages::inbox(c)).unwrap().len(), 0);
@@ -237,38 +264,41 @@ fn html_unescape(s: &str) -> String {
 }
 
 #[tokio::test]
-async fn only_the_text_the_admin_left_is_sent() {
+async fn a_household_value_typed_back_in_is_refused_before_anything_is_sent() {
     let server = mock_model(good_draft()).await;
     let (h, admin) = setup(&server).await;
-    // Personal parts edited out before sending.
-    let edited = "Paack: Olá, a sua encomenda PCK7Q2W9D da Worten será entregue hoje. Código de entrega 5527.";
-    let res = h
-        .app
-        .clone()
-        .oneshot(form(
-            "/rules/draft",
-            &admin,
-            &[
-                ("_csrf", "csrf-token"),
-                ("message_id", "1"),
-                ("action", "send"),
-                ("text", edited),
-            ],
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 1);
-    let sent = String::from_utf8(requests[0].body.clone()).unwrap();
-    assert!(sent.contains(edited), "{sent}");
-    for removed in ["Ferreira", "Liberdade", "912 345 678", "ana@example.com"] {
-        assert!(!sent.contains(removed), "{removed} was sent: {sent}");
+    for (text, kind) in [
+        ("Olá Ana Ferreira, encomenda PCK1AAAA1", "name"),
+        (
+            "encomenda PCK1AAAA1 para avenida da LIBERDADE 10",
+            "address",
+        ),
+        ("encomenda PCK1AAAA1, tel +351 912-345-678", "phone"),
+        ("encomenda PCK1AAAA1 ANA@example.com", "email"),
+    ] {
+        let res = h
+            .app
+            .clone()
+            .oneshot(form(
+                "/rules/draft",
+                &admin,
+                &[
+                    ("_csrf", "csrf-token"),
+                    ("message_id", "1"),
+                    ("action", "send"),
+                    ("redacted", text),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "{text}");
+        let html = body(res).await;
+        assert!(
+            html.contains(&format!("still contains a household {kind}")),
+            "{text}: {html}"
+        );
     }
-    // The message in the inbox is untouched until the rule is saved.
-    assert_eq!(h.db.blocking(|c| messages::inbox(c)).unwrap().len(), 1);
-
-    // Nothing to send, nothing sent.
+    // The hint is checked too.
     let res = h
         .app
         .clone()
@@ -279,13 +309,14 @@ async fn only_the_text_the_admin_left_is_sent() {
                 ("_csrf", "csrf-token"),
                 ("message_id", "1"),
                 ("action", "send"),
-                ("text", "  \r\n "),
+                ("redacted", "encomenda PCK1AAAA1"),
+                ("hint", "for David"),
             ],
         ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -310,7 +341,7 @@ async fn drafting_is_for_admins_and_needs_a_model() {
                 ("_csrf", "csrf-token"),
                 ("message_id", "1"),
                 ("action", "send"),
-                ("text", "x"),
+                ("redacted", "x"),
             ],
         ))
         .await
@@ -352,7 +383,7 @@ async fn a_failing_model_is_reported_and_the_message_stays() {
                 ("_csrf", "csrf-token"),
                 ("message_id", "1"),
                 ("action", "send"),
-                ("text", "encomenda PCK1AAAA1"),
+                ("redacted", "encomenda PCK1AAAA1"),
             ],
         ))
         .await
@@ -364,6 +395,59 @@ async fn a_failing_model_is_reported_and_the_message_stays() {
         h.db.blocking(|c| messages::inbox(c)).unwrap()[0].result,
         MessageResult::Unmatched
     );
+}
+
+#[tokio::test]
+async fn the_household_is_an_admin_setting() {
+    let h = harness();
+    let admin = session_cookie(&h.key, &session(true));
+    let member = session_cookie(&h.key, &session(false));
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/settings/household",
+            &member,
+            &[("_csrf", "csrf-token"), ("names", "Ana")],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert!(
+        h.db.blocking(|c| settings::household(c))
+            .unwrap()
+            .is_empty()
+    );
+    let html = body(
+        h.app
+            .clone()
+            .oneshot(get("/settings", &member))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(!html.contains("Household"), "members don't see it");
+
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/settings/household",
+            &admin,
+            &[
+                ("_csrf", "csrf-token"),
+                ("names", "Ana Ferreira\n\n Ana \nAna"),
+                ("phones", "912 345 678"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let saved = h.db.blocking(|c| settings::household(c)).unwrap();
+    assert_eq!(saved.names, ["Ana Ferreira", "Ana"]);
+    assert_eq!(saved.phones, ["912 345 678"]);
+    let html = body(h.app.oneshot(get("/settings", &admin)).await.unwrap()).await;
+    assert!(html.contains("Ana Ferreira"), "{html}");
 }
 
 const SHARED: &str = include_str!("fixtures/shared/paack-out-for-delivery.lastmile.yaml");
@@ -564,10 +648,12 @@ async fn bad_imports_are_refused_with_the_reasons() {
 }
 
 #[tokio::test]
-async fn a_rule_is_exported_with_its_samples_in_both_forms() {
+async fn a_rule_is_exported_with_redacted_samples_in_both_forms() {
     let h = harness();
     let admin = session_cookie(&h.key, &session(true));
-    // A rule of our own with a sample holding personal data.
+    h.db.blocking(|c| settings::set_household(c, &household()))
+        .unwrap();
+    // A rule of our own with a sample holding personal data (kept as it is).
     let res = h
         .app
         .clone()
@@ -583,6 +669,7 @@ async fn a_rule_is_exported_with_its_samples_in_both_forms() {
                 ("test_text", ORIGINAL),
                 ("test_channel", "share"),
                 ("add_sample", "1"),
+                ("keep_original", "1"),
             ],
         ))
         .await
@@ -602,9 +689,16 @@ async fn a_rule_is_exported_with_its_samples_in_both_forms() {
     .await;
     assert!(html.contains("lastmile: rule/v1"), "{html}");
     assert!(html.contains("lastmile:rule:v1:"), "{html}");
-    // The samples are there as saved, and the page says so.
-    assert!(html.contains("Ana Ferreira"), "{html}");
-    assert!(html.contains("share the rule without them"), "{html}");
+    assert!(html.contains("‹NAME_1›"), "{html}");
+    for secret in [
+        "Ferreira",
+        "Liberdade",
+        "1250-096",
+        "912 345 678",
+        "ana@example.com",
+    ] {
+        assert!(!html.contains(secret), "{secret} is in the export");
+    }
     let res = h
         .app
         .clone()
@@ -617,40 +711,7 @@ async fn a_rule_is_exported_with_its_samples_in_both_forms() {
     );
     let file = body(res).await;
     // What was exported imports cleanly.
-    let html = body(
-        h.app
-            .clone()
-            .oneshot(multipart(&admin, &file, None))
-            .await
-            .unwrap(),
-    )
-    .await;
+    let html = body(h.app.oneshot(multipart(&admin, &file, None)).await.unwrap()).await;
     assert!(html.contains("passes"), "{html}");
     assert!(!html.contains("fails"), "{html}");
-
-    // Without the samples, the rule goes alone.
-    let alone = body(
-        h.app
-            .clone()
-            .oneshot(get(
-                &format!("/rules/{id}/export.yaml?samples=none"),
-                &admin,
-            ))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert!(
-        !alone.contains("Ferreira") && !alone.contains("samples:"),
-        "{alone}"
-    );
-    let html = body(
-        h.app
-            .oneshot(get(&format!("/rules/{id}/export?samples=none"), &admin))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert!(html.contains("Shared without its samples"), "{html}");
-    assert!(!html.contains("Ferreira"), "{html}");
 }

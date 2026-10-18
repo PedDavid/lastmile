@@ -6,24 +6,19 @@
   </a>
   <div>
     <h1 class="text-2xl font-semibold tracking-tight">Share a rule</h1>
-    <p class="text-muted-foreground text-sm">This is everything that leaves: the rule{% if !without_samples %}, and {{ samples }} sample{% if samples != 1 %}s{% endif %} exactly as saved{% endif %}. Whoever imports it gets it disabled, to look at first.</p>
+    <p class="text-muted-foreground text-sm">This is everything that leaves: the rule, and {{ samples }} sample{% if samples != 1 %}s{% endif %} with the household values replaced. Whoever imports it gets it disabled, to look at first.</p>
   </div>
 
-  {% if without_samples %}
+  {% if household_empty %}
   <div class="alert" role="status">
     {% include "icons/info.svg" %}
-    <h2>Shared without its samples. <a class="underline underline-offset-4" href="/rules/{{ id }}/export">Include them</a></h2>
-  </div>
-  {% else if samples > 0 %}
-  <div class="alert" role="status">
-    {% include "icons/info.svg" %}
-    <h2>The samples are real messages, names and addresses included. Read them below before you copy this anywhere, or <a class="underline underline-offset-4" href="/rules/{{ id }}/export?samples=none">share the rule without them</a>.</h2>
+    <h2>No household values are set, so the samples are only redacted by format. Add yours in <a class="underline underline-offset-4" href="/settings">Settings</a> before sharing.</h2>
   </div>
   {% endif %}
   {% if dropped > 0 %}
   <div class="alert" role="status">
     {% include "icons/info.svg" %}
-    <h2>{{ dropped }} sample{% if dropped != 1 %}s were{% else %} was{% endif %} left out: the rule no longer reads {% if dropped != 1 %}them{% else %}it{% endif %} the way {% if dropped != 1 %}they were{% else %}it was{% endif %} saved.</h2>
+    <h2>{{ dropped }} sample{% if dropped != 1 %}s were{% else %} was{% endif %} left out: the rule no longer reads {% if dropped != 1 %}them{% else %}it{% endif %} once redacted.</h2>
   </div>
   {% endif %}
 
@@ -36,7 +31,7 @@
       <textarea class="textarea w-full font-mono text-xs" rows="16" readonly spellcheck="false" aria-label="Rule document" id="yaml">{{ yaml }}</textarea>
       <div class="flex flex-wrap gap-2">
         <button type="button" class="btn" data-copy-from="yaml">{% include "icons/copy.svg" %} Copy text</button>
-        <a class="btn" data-variant="outline" href="/rules/{{ id }}/export.yaml{% if without_samples %}?samples=none{% endif %}">{% include "icons/upload.svg" %} Download {{ file_name }}</a>
+        <a class="btn" data-variant="outline" href="/rules/{{ id }}/export.yaml">{% include "icons/upload.svg" %} Download {{ file_name }}</a>
       </div>
     </section>
   </div>

@@ -3,7 +3,7 @@
 
 use askama::Template;
 use axum::Form;
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{Multipart, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
@@ -13,8 +13,8 @@ use serde::Deserialize;
 use super::auth::Admin;
 use super::pages::Layout;
 use super::{AppError, AppState};
-use crate::db::messages;
 use crate::db::rules::{self as rule_db, Origin};
+use crate::db::{messages, settings};
 use crate::rules::engine::{self, Input, Outcome};
 use crate::rules::share::{self, RuleDoc};
 
@@ -36,36 +36,26 @@ struct ExportPage {
     blob: String,
     samples: usize,
     dropped: usize,
-    /// The samples are left out of the document.
-    without_samples: bool,
+    household_empty: bool,
     file_name: String,
 }
 
-#[derive(Deserialize)]
-pub struct ExportQuery {
-    /// `none` shares the rule alone.
-    samples: Option<String>,
-}
-
-impl ExportQuery {
-    fn with_samples(&self) -> bool {
-        self.samples.as_deref() != Some("none")
-    }
-}
-
-async fn load_export(
-    state: &AppState,
-    id: String,
-    with_samples: bool,
-) -> Result<(RuleDoc, usize), AppError> {
+async fn load_export(state: &AppState, id: String) -> Result<(RuleDoc, usize, bool), AppError> {
     let missing = format!("no rule {id}");
-    let (rule, samples) = state
+    let (rule, samples, household) = state
         .inner
         .db
-        .call(move |c| Ok((rule_db::get(c, &id)?, rule_db::all_samples(c)?)))
+        .call(move |c| {
+            Ok((
+                rule_db::get(c, &id)?,
+                rule_db::all_samples(c)?,
+                settings::household(c)?,
+            ))
+        })
         .await?;
     let rule = rule.ok_or(AppError::NotFound(missing))?;
-    Ok(share::export(&rule, &samples, with_samples))
+    let (doc, dropped) = share::export(&rule, &samples, &household);
+    Ok((doc, dropped, household.is_empty()))
 }
 
 /// What a rule looks like when shared, for the admin to read before
@@ -75,9 +65,8 @@ pub async fn export_page(
     Admin(session): Admin,
     jar: CookieJar,
     Path(id): Path<String>,
-    Query(q): Query<ExportQuery>,
 ) -> Result<Response, AppError> {
-    let (doc, dropped) = load_export(&state, id, q.with_samples()).await?;
+    let (doc, dropped, household_empty) = load_export(&state, id).await?;
     Ok(Html(
         ExportPage {
             layout: Layout::new(&state, &session, &jar, "Share a rule"),
@@ -87,7 +76,7 @@ pub async fn export_page(
             blob: doc.to_blob(),
             samples: doc.samples.len(),
             dropped,
-            without_samples: !q.with_samples(),
+            household_empty,
             file_name: share::file_name(&doc.def),
         }
         .render()?,
@@ -99,9 +88,8 @@ pub async fn export_file(
     State(state): State<AppState>,
     Admin(_): Admin,
     Path(id): Path<String>,
-    Query(q): Query<ExportQuery>,
 ) -> Result<Response, AppError> {
-    let (doc, _) = load_export(&state, id, q.with_samples()).await?;
+    let (doc, _, _) = load_export(&state, id).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "text/yaml; charset=utf-8".to_string()),

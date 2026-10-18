@@ -9,17 +9,40 @@ use axum_extra::extract::CookieJar;
 use jiff::Timestamp;
 use serde::Deserialize;
 
-use super::auth::{Session, User};
+use super::auth::{Admin, Session, User};
 use super::pages::Layout;
 use super::views::relative;
 use super::{AppError, AppState};
-use crate::db::tokens;
+use crate::db::{settings as settings_db, tokens};
+use crate::redact::Household;
 
 pub struct TokenRow {
     pub id: i64,
     pub name: String,
     pub created: String,
     pub last_used: String,
+}
+
+/// The household values, one per line, as the admin form shows them.
+pub struct HouseholdLines {
+    pub names: String,
+    pub addresses: String,
+    pub postcodes: String,
+    pub phones: String,
+    pub emails: String,
+}
+
+impl From<&Household> for HouseholdLines {
+    fn from(h: &Household) -> Self {
+        let join = |v: &[String]| v.join("\n");
+        HouseholdLines {
+            names: join(&h.names),
+            addresses: join(&h.addresses),
+            postcodes: join(&h.postcodes),
+            phones: join(&h.phones),
+            emails: join(&h.emails),
+        }
+    }
 }
 
 /// What the page says about the rule-drafting model.
@@ -32,7 +55,10 @@ pub struct LlmInfo {
 #[template(path = "settings.html")]
 struct SettingsPage {
     layout: Layout,
+    /// Admins only.
+    household: Option<HouseholdLines>,
     llm: Option<LlmInfo>,
+    notice: &'static str,
     tokens: Vec<TokenRow>,
     /// A token just created: shown once, never again.
     new_token: String,
@@ -44,10 +70,15 @@ async fn page(
     session: &Session,
     jar: &CookieJar,
     new_token: String,
+    notice: &'static str,
 ) -> Result<Response, AppError> {
     let now = state.now();
     let sub = session.sub.clone();
-    let list = state.inner.db.call(move |c| tokens::list(c, &sub)).await?;
+    let (list, household) = state
+        .inner
+        .db
+        .call(move |c| Ok((tokens::list(c, &sub)?, settings_db::household(c)?)))
+        .await?;
     let tokens = list
         .iter()
         .map(|t| TokenRow {
@@ -63,10 +94,12 @@ async fn page(
     Ok(Html(
         SettingsPage {
             layout: Layout::new(state, session, jar, "Settings"),
+            household: session.admin.then(|| HouseholdLines::from(&household)),
             llm: state.inner.llm.as_ref().map(|l| LlmInfo {
                 model: l.model().to_string(),
                 host: l.host(),
             }),
+            notice,
             tokens,
             new_token,
             ingest_url: format!(
@@ -84,7 +117,67 @@ pub async fn settings(
     User(session): User,
     jar: CookieJar,
 ) -> Result<Response, AppError> {
-    page(&state, &session, &jar, String::new()).await
+    page(&state, &session, &jar, String::new(), "").await
+}
+
+#[derive(Deserialize)]
+pub struct HouseholdForm {
+    #[serde(rename = "_csrf")]
+    csrf: Option<String>,
+    #[serde(default)]
+    names: String,
+    #[serde(default)]
+    addresses: String,
+    #[serde(default)]
+    postcodes: String,
+    #[serde(default)]
+    phones: String,
+    #[serde(default)]
+    emails: String,
+}
+
+/// The household's names, addresses, postcodes, phone numbers and emails:
+/// what redaction removes first from anything that leaves the cluster.
+pub async fn save_household(
+    State(state): State<AppState>,
+    Admin(session): Admin,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Form(form): Form<HouseholdForm>,
+) -> Result<Response, AppError> {
+    session.check_csrf(&headers, form.csrf.as_deref())?;
+    let too_long = [
+        &form.names,
+        &form.addresses,
+        &form.postcodes,
+        &form.phones,
+        &form.emails,
+    ]
+    .iter()
+    .any(|f| f.len() > 8 * 1024);
+    if too_long {
+        return Err(AppError::BadRequest("a list is too long".into()));
+    }
+    let household = Household {
+        names: Household::parse_lines(&form.names),
+        addresses: Household::parse_lines(&form.addresses),
+        postcodes: Household::parse_lines(&form.postcodes),
+        phones: Household::parse_lines(&form.phones),
+        emails: Household::parse_lines(&form.emails),
+    };
+    state
+        .inner
+        .db
+        .call(move |c| settings_db::set_household(c, &household))
+        .await?;
+    page(
+        &state,
+        &session,
+        &jar,
+        String::new(),
+        "Household values saved.",
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -118,7 +211,7 @@ pub async fn create_token(
         .call(move |c| tokens::create(c, &sub, &user, &name, &value, now))
         .await?;
     // Rendered directly (not redirected) so the secret is never in a URL.
-    page(&state, &session, &jar, secret).await
+    page(&state, &session, &jar, secret, "").await
 }
 
 #[derive(Deserialize)]
