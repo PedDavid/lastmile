@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto flex max-w-2xl flex-col gap-6">
+  <a href="{% if let Some(id) = id %}/packages/{{ id }}{% else %}/{% endif %}" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
+    {% include "icons/chevron-left.svg" %} {% if id.is_some() %}Back to the package{% else %}All packages{% endif %}
+  </a>
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">{{ layout.title }}</h1>
+    <p class="text-muted-foreground text-sm">Only the name is needed. The courier is filled in from the tracking number when it can be told.</p>
+  </div>
+
+  {% if !error.is_empty() %}
+  <div class="alert" data-variant="destructive" role="alert">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>{{ error }}</h2>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ action() }}" class="flex flex-col gap-6" autocomplete="off">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+
+    <fieldset class="card">
+      <header><h2>What</h2></header>
+      <section class="grid gap-4 sm:grid-cols-2">
+        <div class="field sm:col-span-2">
+          <label for="title">Name</label>
+          <input id="title" name="title" value="{{ form.title }}" required maxlength="500" placeholder="Running shoes">
+        </div>
+        <div class="field">
+          <label for="merchant">Shop</label>
+          <input id="merchant" name="merchant" value="{{ form.merchant }}" list="merchants" maxlength="500">
+        </div>
+        <div class="field">
+          <label for="order_ref">Order number</label>
+          <input id="order_ref" name="order_ref" value="{{ form.order_ref }}" maxlength="500">
+        </div>
+        <div class="field">
+          <label for="recipient">For</label>
+          <input id="recipient" name="recipient" value="{{ form.recipient }}" list="recipients" maxlength="500" placeholder="Anyone">
+        </div>
+        {% if id.is_none() %}
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status" name="status" class="select w-full">
+            {% for (value, label) in statuses %}
+            <option value="{{ value }}" {% if *value == form.status %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+      </section>
+    </fieldset>
+
+    <fieldset class="card">
+      <header><h2>Delivery</h2></header>
+      <section class="grid gap-4 sm:grid-cols-2">
+        <div class="field">
+          <label for="tracking_number">Tracking number</label>
+          <input id="tracking_number" name="tracking_number" value="{{ form.tracking_number }}" maxlength="500" spellcheck="false" placeholder="RR123456789PT">
+        </div>
+        <div class="field">
+          <label for="courier">Courier</label>
+          <input id="courier" name="courier" value="{{ form.courier }}" list="couriers" maxlength="500" placeholder="From the tracking number">
+        </div>
+        <div class="field sm:col-span-2">
+          <label for="tracking_url">Tracking link</label>
+          <input id="tracking_url" name="tracking_url" type="url" value="{{ form.tracking_url }}" maxlength="500" placeholder="https://">
+        </div>
+        <div class="field">
+          <label for="eta_from">Expected from</label>
+          <input id="eta_from" name="eta_from" type="date" value="{{ form.eta_from }}">
+        </div>
+        <div class="field">
+          <label for="eta_to">Expected until</label>
+          <input id="eta_to" name="eta_to" type="date" value="{{ form.eta_to }}">
+        </div>
+      </section>
+    </fieldset>
+
+    <fieldset class="card">
+      <header>
+        <h2>Code</h2>
+        <p>For the courier at the door, or for a locker or shop.</p>
+      </header>
+      <section class="grid gap-4 sm:grid-cols-2">
+        <div class="field">
+          <label for="code">Code</label>
+          <input id="code" name="code" value="{{ form.code }}" maxlength="500" spellcheck="false" inputmode="text" class="font-mono">
+        </div>
+        <div class="field">
+          <label for="code_kind">Used for</label>
+          <select id="code_kind" name="code_kind" class="select w-full">
+            <option value="">—</option>
+            <option value="delivery" {% if form.code_kind == "delivery" %}selected{% endif %}>Delivery at the door</option>
+            <option value="pickup" {% if form.code_kind == "pickup" %}selected{% endif %}>Pickup at a locker or shop</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="code_expires_at">Collect by</label>
+          <input id="code_expires_at" name="code_expires_at" type="date" value="{{ form.code_expires_at }}">
+        </div>
+        <div class="field">
+          <label for="pickup_name">Pickup point</label>
+          <input id="pickup_name" name="pickup_name" value="{{ form.pickup_name }}" maxlength="500" placeholder="Locker, shop…">
+        </div>
+        <div class="field">
+          <label for="pickup_address">Address</label>
+          <input id="pickup_address" name="pickup_address" value="{{ form.pickup_address }}" maxlength="500">
+        </div>
+        <div class="field">
+          <label for="pickup_hours">Opening hours</label>
+          <input id="pickup_hours" name="pickup_hours" value="{{ form.pickup_hours }}" maxlength="500" placeholder="Mon–Sat 9:00–19:00">
+        </div>
+      </section>
+    </fieldset>
+
+    <div class="field">
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="3" maxlength="4000">{{ form.notes }}</textarea>
+    </div>
+
+    <div class="flex justify-end gap-2">
+      <a class="btn" data-variant="outline" href="{% if let Some(id) = id %}/packages/{{ id }}{% else %}/{% endif %}">Cancel</a>
+      <button type="submit" class="btn">{% if id.is_some() %}Save{% else %}Add package{% endif %}</button>
+    </div>
+  </form>
+
+  <datalist id="couriers">{% for c in couriers %}<option value="{{ c }}"></option>{% endfor %}</datalist>
+  <datalist id="recipients">{% for r in recipients %}<option value="{{ r }}"></option>{% endfor %}</datalist>
+  <datalist id="merchants">{% for m in merchants %}<option value="{{ m }}"></option>{% endfor %}</datalist>
+</div>
+{% endblock %}
