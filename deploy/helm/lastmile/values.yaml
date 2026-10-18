@@ -1,0 +1,76 @@
+image:
+  repository: ghcr.io/peddavid/lastmile
+  tag: ""  # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+# Public URL of the UI (OIDC redirect, Origin checks).
+publicUrl: https://parcels.example.com
+
+oidc:
+  issuer: ""            # e.g. https://auth.example.com/application/o/lastmile/
+  clientId: lastmile
+  # Secret holding the client secret (leave empty for public clients).
+  clientSecret:
+    existingSecret: ""
+    key: client-secret
+  scopes: "profile email groups"
+  adminClaim: groups
+  adminValue: lastmile-admins
+  sessionTtl: 30d
+
+# Key encrypting session cookies. Generated once and kept across upgrades
+# unless an existing Secret (with key `cookie-key`, >= 64 bytes) is given.
+cookieKey:
+  existingSecret: ""
+
+# The SQLite database. Packages are data the app creates, so they live on a
+# volume: back it up with the rest of your volumes.
+persistence:
+  # Use an existing PVC instead of creating one.
+  existingClaim: ""
+  size: 1Gi
+  storageClassName: ""
+  accessModes: [ReadWriteOnce]
+  # Kept on `helm uninstall` so the packages survive a reinstall.
+  keep: true
+
+# Development only: every visitor is an admin.
+insecureDevAuth: false
+
+service:
+  # Applies to the UI only. Metrics and health checks always get a separate
+  # ClusterIP Service (<fullname>-metrics).
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: parcels.example.com
+  tls: []
+
+# Numeric IDs are required: with runAsNonRoot the kubelet cannot verify a
+# non-numeric image USER. 65532 is distroless's `nonroot`; fsGroup makes the
+# volume writable for it.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+logJson: true
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

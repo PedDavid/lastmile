@@ -1,0 +1,59 @@
+{% if rows.is_empty() %}
+<div class="empty rounded-lg border border-dashed">
+  <header>
+    <figure>{% include "icons/package-open.svg" %}</figure>
+    <h3>Nothing on its way</h3>
+    <p>Packages you add show up here.</p>
+  </header>
+</div>
+{% else %}
+<ul class="flex flex-col gap-3 md:hidden" aria-label="Packages">
+  {% for row in rows %}
+  <li id="package-{{ row.id }}" class="card gap-3 py-4">
+    <section class="flex flex-col gap-3 px-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <a href="{{ row.href() }}" class="block truncate font-medium hover:underline">{{ row.title }}</a>
+          <div class="truncate text-xs text-muted-foreground">{% include "partials/package_meta.html" %}</div>
+        </div>
+        {% include "partials/status_badge.html" %}
+      </div>
+      {% include "partials/package_code.html" %}
+    </section>
+  </li>
+  {% endfor %}
+</ul>
+<div class="table-container hidden rounded-lg border md:block">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Package</th>
+        <th>Status</th>
+        <th>Expected</th>
+        <th>Code</th>
+        <th class="hidden lg:table-cell">Tracking</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <a href="{{ row.href() }}" class="font-medium hover:underline">{{ row.title }}</a>
+          <div class="text-xs text-muted-foreground">{% include "partials/package_meta.html" %}</div>
+        </td>
+        <td>
+          {% include "partials/status_badge.html" %}
+          <div class="mt-1 text-xs text-muted-foreground" title="{{ row.status_date }}">{{ row.status_rel }}</div>
+        </td>
+        <td>{% if row.eta.is_empty() %}<span class="text-muted-foreground">—</span>{% else %}{{ row.eta }}{% endif %}</td>
+        <td>{% include "partials/package_code.html" %}</td>
+        <td class="hidden lg:table-cell">
+          {% if !row.courier.is_empty() %}<span class="badge" data-variant="outline">{{ row.courier }}</span>{% endif %}
+          {% if !row.tracking_number.is_empty() %}<code class="ms-1 text-xs">{{ row.tracking_number }}</code>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

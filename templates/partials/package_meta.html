@@ -1,0 +1,1 @@
+{{ row.merchant }}{% if !row.courier.is_empty() %}<span class="lg:hidden">{% if !row.merchant.is_empty() %} · {% endif %}{{ row.courier }}</span>{% endif %}{% if !row.recipient.is_empty() %} · for {{ row.recipient }}{% endif %}

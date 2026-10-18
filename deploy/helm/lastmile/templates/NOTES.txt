@@ -1,0 +1,9 @@
+lastmile is installed.
+
+UI:       {{ .Values.publicUrl }}
+Database: PVC {{ include "lastmile.claimName" . }}, mounted at /data
+
+{{- if .Values.insecureDevAuth }}
+
+WARNING: insecureDevAuth is on: every visitor is an admin.
+{{- end }}

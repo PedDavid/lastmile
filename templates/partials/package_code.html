@@ -1,0 +1,14 @@
+{% if !row.code.is_empty() %}
+<div class="flex items-center gap-2">
+  <div class="flex flex-col">
+    <span class="text-xs text-muted-foreground">{{ row.code_label }}</span>
+    <span class="code-value">{{ row.code }}</span>
+  </div>
+  <button type="button" class="btn" data-variant="ghost" data-size="icon" data-copy="{{ row.code }}" aria-label="Copy code {{ row.code }}" title="Copy">
+    {% include "icons/copy.svg" %}
+  </button>
+</div>
+{% if !row.pickup_name.is_empty() %}<div class="flex items-center gap-1 text-xs text-muted-foreground [&>svg]:size-3.5">{% include "icons/map-pin.svg" %}<span class="truncate">{{ row.pickup_name }}</span></div>{% endif %}
+{% else if !row.eta.is_empty() %}
+<div class="text-sm md:hidden"><span class="text-muted-foreground">Expected</span> {{ row.eta }}</div>
+{% endif %}
