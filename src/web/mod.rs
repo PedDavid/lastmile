@@ -311,7 +311,6 @@ pub fn router(state: AppState) -> Router {
             post(rules::delete_sample),
         )
         .route("/settings", get(settings::settings))
-        .route("/settings/household", post(settings::save_household))
         .route("/settings/tokens", post(settings::create_token))
         .route("/settings/tokens/{id}/revoke", post(settings::revoke_token))
         .route(

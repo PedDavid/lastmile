@@ -7,7 +7,6 @@ use rusqlite::Connection;
 const MIGRATIONS: &[&str] = &[
     include_str!("sql/0001_packages.sql"),
     include_str!("sql/0002_messages_rules.sql"),
-    include_str!("sql/0003_settings.sql"),
 ];
 
 pub fn latest() -> usize {
