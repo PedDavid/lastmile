@@ -1,7 +1,7 @@
 //! A client for OpenAI-compatible APIs: OpenAI itself, or a self-hosted
 //! server that speaks the same protocol (Ollama, vLLM, llama.cpp, LM
 //! Studio). It only ever drafts rules: the model never reads a message on
-//! the recurring path, and everything sent to it is redacted first.
+//! the recurring path, and it only sees text an admin has read and sent.
 
 use std::time::Duration;
 
@@ -56,8 +56,6 @@ pub enum LlmError {
     Status { status: u16, body: String },
     #[error("unexpected reply from the model: {0}")]
     Reply(String),
-    #[error("refusing to send: the text still contains a household {0}")]
-    Leak(&'static str),
 }
 
 pub struct Client {

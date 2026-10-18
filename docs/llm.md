@@ -9,38 +9,32 @@ Drafting is off until a model is configured. It then shows up for admins as
 
 ## What is sent
 
-1. **Redaction.** The message is redacted before anything else happens:
-   your household's names, addresses, postcodes, phone numbers and emails
-   (*Settings → Household*) are replaced, ignoring case and accents, and so is
-   anything with a recognisable personal format: emails, phone numbers,
-   postcodes, NIFs, IBANs and card numbers (checksums validated), the path
-   tokens and query values of URLs (the host stays), and the name in a
-   greeting (*Olá Ana*). They become numbered placeholders that keep the text's
-   shape: `‹NAME_1›`, `‹ADDRESS_1›`, `‹PHONE_1›`.
-   Tracking numbers, delivery and pickup codes, shop and courier names and
-   dates stay: they are what the rule has to find. Tick *also hide the code* to
-   replace the code with `‹CODE:dddd›`.
-2. **You see it first.** The draft page shows the original next to the redacted
-   text, which you can edit. Nothing is sent until you click *Send and draft*.
-3. **A last check.** Whatever is about to be sent is scanned once more for the
-   household's values: if one is in it (you typed it back, or it was spelled in
-   a way the patterns missed), the request is refused.
+1. **Only what you read.** The draft page shows the message as it is, in a text
+   box you can edit, and nothing is sent until you click *Send and draft*. What
+   goes out is that text, the channel, the sender (for emails) and the
+   description you add, plus up to three of your existing rules for the same
+   courier, as examples.
+2. **Take out what is personal.** A message from a courier usually names you,
+   your address and your phone number. The rule doesn't need them: delete them
+   (or replace them with anything) in the text box. The message in the inbox
+   stays as it is, and so does the sample the rule keeps.
+3. **Nothing else.** If a draft fails the local checks, the retry sends back
+   the model's own draft and the problems found, which name fields and rules and
+   never quote the message.
 
-Redaction is a net, not a guarantee: a name you didn't list, or an order number
-that looks like a phone number, can slip through or be replaced wrongly.
-Read the redacted text.
+With a self-hosted model nothing leaves your network, so there is little to take
+out. With a hosted one, what you leave in is sent.
 
 ## What happens to the answer
 
 The model answers with a rule as a JSON object. lastmile then checks it
 *locally* before showing it: the rule compiles within its limits, it matches the
-message (the redacted one, and the original, which is only ever run here), it
-reads a tracking number or order reference, and it doesn't change what any other
-rule's saved samples read. If a check fails, the problems (never the message)
-go back to the model, up to three more times. You get the best draft and
-what is still wrong with it, in the editor, where it is only saved when you
-save it. The message becomes the rule's first sample, stored redacted unless
-you tick *Store the sample as it is*.
+message, it reads a tracking number or order reference, and it doesn't change
+what any other rule's saved samples read. If a check fails, the problems (never
+the message) go back to the model, up to three more times. You get the best
+draft and what is still wrong with it, in the editor, where it is only saved
+when you save it. The message becomes the rule's first sample, stored as it
+came.
 
 ## Configuring the model
 
@@ -84,10 +78,6 @@ back as unparsable text, use `--llm-structured json` or `none` (lastmile then
 puts the schema in the prompt and reads the JSON out of the reply, even inside
 code fences). Small models need the retries more; the local checks are what keep
 a bad draft from being saved.
-
-Because nothing personal leaves the cluster with a self-hosted model, you may
-care less about the redaction there. It still runs: it is also what makes
-samples safe to share.
 
 ### Helm
 

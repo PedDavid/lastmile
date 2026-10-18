@@ -6,10 +6,8 @@ use rusqlite::Connection;
 use crate::db::messages::{self, MessageResult, NewMessage, ResultUpdate};
 use crate::db::packages;
 use crate::db::rules::{self as rule_db, Origin};
-use crate::db::settings;
 use crate::ingest::{self, Incoming};
 use crate::model::{Channel, CodeKind, NewPackage, PickupPoint, Source, Status};
-use crate::redact::Household;
 use crate::rules::engine::{self, Input, Outcome};
 use crate::rules::schema::RuleDef;
 
@@ -178,19 +176,7 @@ pub fn load(conn: &mut Connection, now: Timestamp) -> rusqlite::Result<()> {
     load_rules_and_messages(conn, now)
 }
 
-/// The made-up household of the demo: what its messages mention.
-pub fn household() -> Household {
-    Household {
-        names: vec!["Ana Ferreira".into(), "Ana".into(), "David".into()],
-        addresses: vec!["Avenida da Liberdade 10".into()],
-        postcodes: vec!["1250-096".into()],
-        phones: vec!["912345678".into()],
-        emails: vec!["ana@example.com".into()],
-    }
-}
-
 fn load_rules_and_messages(conn: &mut Connection, now: Timestamp) -> rusqlite::Result<()> {
-    settings::set_household(conn, &household())?;
     let samples: [(&str, Channel, &str); 3] = [
         (
             "ctt-ready-for-pickup",

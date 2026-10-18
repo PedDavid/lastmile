@@ -6,13 +6,6 @@
     <p class="text-muted-foreground text-sm">Signed in as {{ layout.user }}{% if layout.admin %} (admin){% endif %}.</p>
   </div>
 
-  {% if !notice.is_empty() %}
-  <div class="alert" role="status">
-    {% include "icons/circle-check.svg" %}
-    <h2>{{ notice }}</h2>
-  </div>
-  {% endif %}
-
   {% if !new_token.is_empty() %}
   <div class="alert" role="status">
     {% include "icons/circle-check.svg" %}
@@ -57,47 +50,14 @@
     </section>
   </div>
 
-  {% if let Some(h) = household %}
-  <form class="card" method="post" action="/settings/household">
-    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
-    <header>
-      <h2>Household</h2>
-      <p>The names, addresses, phone numbers and emails of the people who get packages here, one per line. Anything that leaves the app (a message sent to the model that drafts rules, the samples of a shared rule) has these replaced first, ignoring case and accents. Phones, emails, postcodes, NIFs, IBANs and card numbers are also found by their format.</p>
-    </header>
-    <section class="grid gap-4 sm:grid-cols-2">
-      <div class="field">
-        <label for="names">Names</label>
-        <textarea id="names" name="names" rows="3" maxlength="8192" placeholder="Ana Ferreira&#10;Ana">{{ h.names }}</textarea>
-      </div>
-      <div class="field">
-        <label for="addresses">Addresses</label>
-        <textarea id="addresses" name="addresses" rows="3" maxlength="8192" placeholder="Avenida da Liberdade 10">{{ h.addresses }}</textarea>
-      </div>
-      <div class="field">
-        <label for="postcodes">Postcodes</label>
-        <textarea id="postcodes" name="postcodes" rows="2" maxlength="8192" placeholder="1250-096">{{ h.postcodes }}</textarea>
-      </div>
-      <div class="field">
-        <label for="phones">Phone numbers</label>
-        <textarea id="phones" name="phones" rows="2" maxlength="8192" placeholder="912 345 678">{{ h.phones }}</textarea>
-      </div>
-      <div class="field sm:col-span-2">
-        <label for="emails">Email addresses</label>
-        <textarea id="emails" name="emails" rows="2" maxlength="8192" placeholder="ana@example.com">{{ h.emails }}</textarea>
-      </div>
-    </section>
-    <footer class="justify-end">
-      <button type="submit" class="btn">Save</button>
-    </footer>
-  </form>
-
+  {% if layout.admin %}
   <div class="card">
     <header>
       <h2>Drafting rules with a model</h2>
     </header>
     <section class="text-sm">
       {% if let Some(l) = llm %}
-      <p>On: <code>{{ l.model }}</code> at <code>{{ l.host }}</code>. A message is only sent after an admin has seen it redacted and clicked <em>Send</em>.</p>
+      <p>On: <code>{{ l.model }}</code> at <code>{{ l.host }}</code>. A message is only sent after an admin has read it and clicked <em>Send</em>.</p>
       {% else %}
       <p class="text-muted-foreground">Off. Set <code>--llm-model</code> (and, for OpenAI, <code>--llm-api-key-file</code>) to let admins draft rules from inbox messages; see <code>docs/llm.md</code>, which also covers self-hosted models.</p>
       {% endif %}
