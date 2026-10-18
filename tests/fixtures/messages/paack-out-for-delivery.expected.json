@@ -1,0 +1,12 @@
+{
+  "channel": "share",
+  "rule": "paack-out-for-delivery",
+  "fields": {
+    "code": "7315",
+    "code_kind": "delivery",
+    "courier": "Paack",
+    "status": "out_for_delivery",
+    "tracking_number": "PCK8F3K2Q",
+    "tracking_url": "https://track.paack.app/t/AbC123xYz"
+  }
+}

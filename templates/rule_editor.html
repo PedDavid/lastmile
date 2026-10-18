@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <a href="/rules" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
+    {% include "icons/chevron-left.svg" %} All rules
+  </a>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">{{ layout.title }}</h1>
+      <p class="text-muted-foreground text-sm">{% if let Some(r) = rule %}Version {{ r.version }}{% if !r.enabled %} · disabled{% endif %}. {% endif %}The preview updates as you type; saving re-runs every rule's samples and the inbox.</p>
+    </div>
+    {% if let Some(r) = rule %}
+    <form method="post" action="/rules/{{ r.id }}/toggle">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      <button type="submit" class="btn" data-variant="outline">{% if r.enabled %}Disable{% else %}Enable{% endif %}</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if !notice.is_empty() %}
+  <div class="alert"{% if needs_confirm || notice.contains(':') %} data-variant="destructive" role="alert"{% else %} role="status"{% endif %}>
+    {% include "icons/info.svg" %}
+    <h2 class="whitespace-pre-line">{{ notice }}</h2>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 lg:grid-cols-2">
+    <form id="rule-form" method="post" action="{{ action() }}" class="flex flex-col gap-4"
+          hx-post="{{ action() }}/preview" hx-trigger="input changed delay:400ms" hx-target="#preview" hx-swap="innerHTML">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      {% if let Some(id) = form.message_id %}<input type="hidden" name="message_id" value="{{ id }}">{% endif %}
+      <div class="field">
+        <label for="source">Rule</label>
+        <textarea id="source" name="source" rows="20" spellcheck="false" class="font-mono text-xs" required>{{ form.source }}</textarea>
+        <p>Regexes use Rust syntax: no look-around or backreferences. The named group <code>v</code> is the value; dates may be written <code>21/10</code> or <code>21/10/2026</code>.</p>
+      </div>
+      <div class="field">
+        <label for="test_text">Try it on a message</label>
+        <textarea id="test_text" name="test_text" rows="6" spellcheck="false" class="font-mono text-xs" placeholder="Paste a message here">{{ form.test_text }}</textarea>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <select name="test_channel" class="select" aria-label="Channel">
+          {% for (value, label) in channels %}<option value="{{ value }}" {% if *value == form.test_channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <input name="test_sender" value="{{ form.test_sender }}" placeholder="Sender (emails)" aria-label="Sender" class="input max-w-60">
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" class="input" name="add_sample" value="1" {% if form.add_sample.is_some() %}checked{% endif %}>
+        Keep this message as a sample (checked on every save)
+      </label>
+      {% if needs_confirm %}
+      <label class="flex items-center gap-2 text-sm font-medium text-destructive">
+        <input type="checkbox" class="input" name="confirm" value="1">
+        Save anyway: the samples marked below will change
+      </label>
+      {% endif %}
+      <div class="flex justify-end gap-2">
+        <a class="btn" data-variant="outline" href="/rules">Cancel</a>
+        <button type="submit" class="btn">Save rule</button>
+      </div>
+    </form>
+
+    <div id="preview" aria-live="polite">
+      {{ preview|safe }}
+    </div>
+  </div>
+</div>
+{% endblock %}

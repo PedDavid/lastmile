@@ -7,6 +7,9 @@
   <title>{{ layout.title }} · lastmile</title>
   <link rel="stylesheet" href="/assets/dist/app.css?v={{ layout.asset_version }}">
   <link rel="icon" href="/assets/dist/favicon.svg?v={{ layout.asset_version }}" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png">
+  <meta name="theme-color" content="#c2410c">
   <script src="/assets/vendor/htmx/htmx.min.js?v={{ layout.asset_version }}" defer></script>
   <script src="/assets/js/app.js?v={{ layout.asset_version }}" defer></script>
 </head>
@@ -18,8 +21,15 @@
     <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
       <a href="/" class="flex items-center gap-2 font-semibold [&>svg]:size-5">
         {% include "icons/package.svg" %}
-        <span>lastmile</span>
+        <span class="hidden sm:inline">lastmile</span>
       </a>
+      <nav class="flex items-center gap-1" aria-label="Main">
+        <a class="btn" data-variant="ghost" data-size="sm" href="/inbox" aria-label="Inbox">{% include "icons/inbox.svg" %}<span class="hidden sm:inline">Inbox</span></a>
+        {% if layout.admin %}
+        <a class="btn" data-variant="ghost" data-size="sm" href="/rules" aria-label="Rules">{% include "icons/workflow.svg" %}<span class="hidden sm:inline">Rules</span></a>
+        {% endif %}
+        <a class="btn" data-variant="ghost" data-size="sm" href="/settings" aria-label="Settings" title="Settings">{% include "icons/settings.svg" %}</a>
+      </nav>
       <div class="ms-auto flex items-center gap-1">
         <button type="button" class="btn hidden sm:inline-flex text-muted-foreground" data-variant="outline" data-size="sm" data-palette-open aria-label="Search packages" aria-keyshortcuts="Control+K Meta+K">
           {% include "icons/search.svg" %}

@@ -1,0 +1,14 @@
+slug: ctt-in-transit
+name: CTT – in transit (email)
+description: The email CTT sends when it accepts an object, with the expected day.
+courier: CTT
+match:
+  channels: [upload]
+  sender: ['*@ctt.pt']
+  all: ['(?i)(em trânsito|aceite)']
+extract:
+  tracking_number: '\b(?P<v>[A-Z]{2}\d{9}PT)\b'
+  eta: '(?i)entrega prevista(?: para)?:? (?P<v>\d{1,2}/\d{1,2}(?:/\d{4})?)'
+set:
+  status: in_transit
+priority: 50

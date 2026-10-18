@@ -4,7 +4,10 @@
 use rusqlite::Connection;
 
 /// Append only: an applied migration is never edited.
-const MIGRATIONS: &[&str] = &[include_str!("sql/0001_packages.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("sql/0001_packages.sql"),
+    include_str!("sql/0002_messages_rules.sql"),
+];
 
 pub fn latest() -> usize {
     MIGRATIONS.len()

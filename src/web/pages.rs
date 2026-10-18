@@ -10,6 +10,7 @@ use serde::Deserialize;
 use super::auth::{AuthMode, Session, User};
 use super::views::{PackageDetail, PackageRow};
 use super::{AppError, AppState};
+use crate::db::messages;
 use crate::db::packages::{self, Scope};
 use crate::model::{Filter, Package, Status, sort_packages};
 
@@ -197,8 +198,16 @@ pub async fn index(
 struct DetailPage {
     layout: Layout,
     p: PackageDetail,
+    messages: Vec<LinkedMessage>,
     statuses: Vec<(&'static str, &'static str)>,
     notice: &'static str,
+}
+
+pub struct LinkedMessage {
+    pub channel: &'static str,
+    pub received: String,
+    /// Empty once purged.
+    pub text: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -214,23 +223,36 @@ pub async fn detail(
     Path(id): Path<i64>,
     Query(q): Query<DetailQuery>,
 ) -> Result<Response, AppError> {
-    let (package, events) = state
+    let (package, events, linked) = state
         .inner
         .db
         .call(move |c| {
             let p = packages::get(c, id)?;
             let e = packages::events(c, id)?;
-            Ok((p, e))
+            let m = messages::for_package(c, id)?;
+            Ok((p, e, m))
         })
         .await?;
     let package = package.ok_or_else(|| AppError::NotFound(format!("no package {id}")))?;
-    let p = PackageDetail::new(&package, &events, state.now(), state.inner.cfg.stale_after);
+    let now = state.now();
+    let p = PackageDetail::new(&package, &events, now, state.inner.cfg.stale_after);
+    let messages = linked
+        .iter()
+        .map(|m| LinkedMessage {
+            channel: m.channel.label(),
+            received: super::views::relative(m.received_at, now),
+            text: m.text().unwrap_or_default(),
+        })
+        .collect();
     let notice = match q.notice.as_str() {
         "added" => "Package added.",
         "saved" => "Changes saved.",
         "status" => "Status updated.",
         "archived" => "Archived. It stays searchable.",
         "unarchived" => "Back in the list.",
+        "from-message" => "Package created from the message.",
+        "updated-from-message" => "Package updated from the message.",
+        "attached" => "Message attached.",
         _ => "",
     };
     Ok(Html(
@@ -242,6 +264,7 @@ pub async fn detail(
                 .collect(),
             notice,
             p,
+            messages,
         }
         .render()?,
     )

@@ -82,6 +82,27 @@
     @apply absolute -start-[21px] top-1.5 ring-4 ring-card;
   }
 
+  .dropzone {
+    @apply flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground transition-colors hover:bg-muted/50 has-focus-visible:ring-2 has-focus-visible:ring-ring [&>svg]:size-6;
+  }
+  .dropzone[data-dragging='true'] {
+    @apply border-foreground bg-muted;
+  }
+
+  .fields {
+    @apply grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs;
+  }
+  .fields dt {
+    @apply text-muted-foreground;
+  }
+  .fields dd {
+    @apply font-mono break-all;
+  }
+
+  .message-text {
+    @apply max-h-40 overflow-y-auto rounded-md bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap break-words;
+  }
+
   .btn[data-copied='true'] {
     @apply text-(--status-delivered);
   }

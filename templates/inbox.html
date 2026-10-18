@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Inbox</h1>
+    <p class="text-muted-foreground text-sm">Messages about packages come in here. A rule turns each into a package; the ones no rule read wait below.</p>
+  </div>
+
+  {% if !notice.is_empty() %}
+  <div class="alert" role="status">
+    {% include "icons/info.svg" %}
+    <h2>{{ notice }}</h2>
+  </div>
+  {% endif %}
+
+  {% if !uploads.is_empty() %}
+  <div class="card" id="upload-results">
+    <header><h2>Uploaded</h2></header>
+    <section>
+      <ul class="flex flex-col gap-2 text-sm">
+        {% for u in uploads %}
+        <li class="flex flex-wrap items-center gap-2">
+          {% if u.ok %}<span class="text-(--status-delivered) [&>svg]:size-4">{% include "icons/circle-check.svg" %}</span>{% else %}<span class="text-muted-foreground [&>svg]:size-4">{% include "icons/info.svg" %}</span>{% endif %}
+          <code class="text-xs">{{ u.name }}</code>
+          <span>{{ u.summary }}</span>
+          {% if let Some(id) = u.package_id %}<a class="underline underline-offset-4" href="/packages/{{ id }}">open</a>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <form class="card" method="post" action="/inbox/paste">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      <header>
+        <h2>Paste a message</h2>
+        <p>An SMS, a WhatsApp message or an email's text.</p>
+      </header>
+      <section>
+        <textarea name="text" rows="4" required maxlength="65536" aria-label="Message" class="textarea w-full" placeholder="CTT: A sua encomenda RR123456789PT está disponível para levantamento…"></textarea>
+      </section>
+      <footer class="justify-end">
+        <button type="submit" class="btn">{% include "icons/clipboard-paste.svg" %} Add</button>
+      </footer>
+    </form>
+
+    <form class="card" method="post" action="/inbox/upload" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      <header>
+        <h2>Drop emails</h2>
+        <p>Exported <code>.eml</code> files: Gmail's <em>Download message</em>, or dragged out of Apple Mail or Thunderbird. Up to {{ max_files }} at a time.</p>
+      </header>
+      <section>
+        <label class="dropzone" data-dropzone>
+          {% include "icons/upload.svg" %}
+          <span><span class="font-medium text-foreground">Choose files</span> or drop them here</span>
+          <input type="file" name="files" accept=".eml,message/rfc822" multiple class="sr-only">
+        </label>
+      </section>
+      <noscript><footer class="justify-end"><button type="submit" class="btn">Upload</button></footer></noscript>
+    </form>
+  </div>
+
+  <section class="flex flex-col gap-3" aria-labelledby="waiting">
+    <h2 id="waiting" class="text-lg font-semibold">Waiting {% if !rows.is_empty() %}<span class="text-muted-foreground font-normal">{{ rows.len() }}</span>{% endif %}</h2>
+    {% if rows.is_empty() %}
+    <div class="empty rounded-lg border border-dashed">
+      <header>
+        <figure>{% include "icons/inbox.svg" %}</figure>
+        <h3>Nothing waiting</h3>
+        <p>Every message so far became a package.</p>
+      </header>
+    </div>
+    {% else %}
+    {% for m in rows %}
+    <article id="message-{{ m.id }}" class="card">
+      <header>
+        <h2 class="flex flex-wrap items-center gap-2">
+          {% if m.kind == "error" %}<span class="badge" data-variant="destructive">Rule failed</span>
+          {% else if m.kind == "attach" %}<span class="badge status-badge" data-status="ready_for_pickup"><span class="status-dot"></span>Which package?</span>
+          {% else %}<span class="badge" data-variant="outline">No rule</span>{% endif %}
+          <span class="font-normal text-muted-foreground text-sm">{{ m.channel }} · {{ m.received }}{% if !m.from.is_empty() %} · {{ m.from }}{% endif %}</span>
+        </h2>
+        {% if !m.subject.is_empty() %}<p class="font-medium text-foreground">{{ m.subject }}</p>{% endif %}
+      </header>
+      <section class="flex flex-col gap-3">
+        {% if m.purged %}
+        <p class="text-sm text-muted-foreground">The text was deleted after the retention period.</p>
+        {% else %}
+        <div class="message-text">{{ m.text }}</div>
+        {% endif %}
+        {% if !m.rule.is_empty() %}
+        <p class="text-sm">Rule <em>{{ m.rule }}</em>{% if !m.error.is_empty() %}: <span class="text-destructive">{{ m.error }}</span>{% endif %}</p>
+        {% endif %}
+        {% if !m.fields.is_empty() %}
+        <dl class="fields">{% for (k, v) in m.fields %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+        {% endif %}
+      </section>
+      <footer class="flex flex-wrap gap-2">
+        {% if !packages.is_empty() %}
+        <form method="post" action="/inbox/{{ m.id }}/attach" class="flex gap-2">
+          <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+          <select name="package_id" class="select max-w-56" aria-label="Package">
+            {% for (id, label) in packages %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn" data-variant="secondary">{% include "icons/link.svg" %} Attach</button>
+        </form>
+        {% endif %}
+        <a class="btn" data-variant="outline" href="/packages/new?message={{ m.id }}">{% include "icons/plus.svg" %} Create package</a>
+        {% if layout.admin && !m.purged %}
+        <a class="btn" data-variant="outline" href="/rules/new?message={{ m.id }}">{% include "icons/workflow.svg" %} Build rule</a>
+        {% endif %}
+        <form method="post" action="/inbox/{{ m.id }}/ignore" class="ms-auto">
+          <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+          <button type="submit" class="btn" data-variant="ghost">{% include "icons/ban.svg" %} Ignore</button>
+        </form>
+      </footer>
+    </article>
+    {% endfor %}
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

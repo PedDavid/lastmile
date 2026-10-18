@@ -1,0 +1,12 @@
+{
+  "channel": "paste",
+  "rule": "ctt-ready-for-pickup",
+  "error": "found no tracking number or order reference",
+  "fields": {
+    "code": "771204",
+    "code_kind": "pickup",
+    "courier": "CTT",
+    "pickup_point": "Loja CTT Restauradores",
+    "status": "ready_for_pickup"
+  }
+}

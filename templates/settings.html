@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto flex max-w-3xl flex-col gap-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
+    <p class="text-muted-foreground text-sm">Signed in as {{ layout.user }}{% if layout.admin %} (admin){% endif %}.</p>
+  </div>
+
+  {% if !new_token.is_empty() %}
+  <div class="alert" role="status">
+    {% include "icons/circle-check.svg" %}
+    <h2>Device added. Copy its token now: it is not shown again.</h2>
+    <section class="flex flex-col gap-2">
+      <div class="flex items-center gap-2">
+        <code class="break-all text-xs">{{ new_token }}</code>
+        <button type="button" class="btn shrink-0" data-variant="outline" data-size="icon" data-copy="{{ new_token }}" aria-label="Copy token" title="Copy">{% include "icons/copy.svg" %}</button>
+      </div>
+    </section>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <header>
+      <h2>Devices</h2>
+      <p>Tokens that let a phone send messages without logging in: the iOS Shortcut uses one. Each belongs to you; revoke it when a phone is lost.</p>
+    </header>
+    <section class="flex flex-col gap-4">
+      {% if tokens.is_empty() %}
+      <p class="text-sm text-muted-foreground">No devices yet.</p>
+      {% else %}
+      <ul class="flex flex-col divide-y text-sm">
+        {% for t in tokens %}
+        <li class="flex items-center gap-3 py-2">
+          <span class="[&>svg]:size-4 text-muted-foreground">{% include "icons/smartphone.svg" %}</span>
+          <span class="font-medium">{{ t.name }}</span>
+          <span class="text-muted-foreground">added {{ t.created }} · used {{ t.last_used }}</span>
+          <form method="post" action="/settings/tokens/{{ t.id }}/revoke" class="ms-auto">
+            <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+            <button type="submit" class="btn" data-variant="ghost" data-size="sm">{% include "icons/trash-2.svg" %} Revoke</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <form method="post" action="/settings/tokens" class="flex flex-wrap gap-2">
+        <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+        <input name="name" required maxlength="100" placeholder="Ana's iPhone" aria-label="Device name" class="input max-w-xs">
+        <button type="submit" class="btn">{% include "icons/plus.svg" %} Add device</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="card">
+    <header>
+      <h2>Sharing from a phone</h2>
+    </header>
+    <section class="flex flex-col gap-3 text-sm">
+      <p><strong>Android:</strong> open lastmile in Chrome and <em>Install app</em>. It then shows up in the share sheet: share an SMS or email to it, check the text and add it.</p>
+      <p><strong>iPhone:</strong> make a Shortcut that takes text from the share sheet and sends it here (steps in <code>docs/ios-shortcut.md</code>):</p>
+      <ol class="flex list-decimal flex-col gap-1 ps-5">
+        <li><em>Receive</em> Text from the Share Sheet.</li>
+        <li><em>Get contents of</em> <code>{{ ingest_url }}</code>: method POST, header <code>Authorization: Bearer &lt;token&gt;</code>, JSON body <code>text</code> = Shortcut Input.</li>
+        <li><em>Show notification</em> with the <code>summary</code> of the result.</li>
+      </ol>
+    </section>
+  </div>
+</div>
+{% endblock %}

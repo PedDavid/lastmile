@@ -9,6 +9,13 @@
     <p class="text-muted-foreground text-sm">Only the name is needed. The courier is filled in from the tracking number when it can be told.</p>
   </div>
 
+  {% if form.message_id.is_some() %}
+  <div class="alert" role="status">
+    {% include "icons/inbox.svg" %}
+    <h2>From an inbox message: what a rule read from it is filled in, and the message is linked to the package.</h2>
+  </div>
+  {% endif %}
+
   {% if !error.is_empty() %}
   <div class="alert" data-variant="destructive" role="alert">
     {% include "icons/triangle-alert.svg" %}
@@ -18,6 +25,7 @@
 
   <form method="post" action="{{ action() }}" class="flex flex-col gap-6" autocomplete="off">
     <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    {% if let Some(m) = form.message_id %}<input type="hidden" name="message_id" value="{{ m }}">{% endif %}
 
     <fieldset class="card">
       <header><h2>What</h2></header>

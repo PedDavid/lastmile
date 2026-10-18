@@ -1,0 +1,24 @@
+From: CTT <notificacoes@ctt.pt>
+To: ana@example.com
+Subject: =?UTF-8?Q?O_seu_objeto_est=C3=A1_em_tr=C3=A2nsito?=
+Date: Fri, 16 Oct 2026 09:30:00 +0100
+Message-ID: <20261016093000.RR987654321PT@ctt.pt>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Ol=C3=A1,
+
+O objeto RR987654321PT foi aceite e est=C3=A1 em tr=C3=A2nsito.
+Entrega prevista: 21/10/2026.
+
+CTT - Correios de Portugal
+
+--b1
+Content-Type: text/html; charset=utf-8
+
+<p>Olá,</p><p>O objeto <b>RR987654321PT</b> foi aceite e está em trânsito.</p><p>Entrega prevista: 21/10/2026.</p>
+--b1--

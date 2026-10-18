@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto flex max-w-xl flex-col gap-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Shared message</h1>
+    <p class="text-muted-foreground text-sm">Check it and add it: the rules turn it into a package, or it waits in the inbox.</p>
+  </div>
+  <form class="card" method="post" action="/inbox/paste">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <input type="hidden" name="channel" value="share">
+    <section>
+      <textarea name="text" rows="8" required maxlength="65536" aria-label="Message" class="textarea w-full">{{ text }}</textarea>
+    </section>
+    <footer class="justify-end gap-2">
+      <a class="btn" data-variant="outline" href="/">Cancel</a>
+      <button type="submit" class="btn">{% include "icons/inbox.svg" %} Add</button>
+    </footer>
+  </form>
+</div>
+{% endblock %}

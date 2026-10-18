@@ -36,6 +36,10 @@ persistence:
 
 # A package with no news for this long needs attention.
 staleAfter: 7d
+# Delivered packages are archived this long after delivery.
+archiveAfter: 7d
+# Message text (personal data) is deleted this long after it came in.
+messageRetention: 30d
 
 # Development only: every visitor is an admin.
 insecureDevAuth: false

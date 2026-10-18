@@ -1,0 +1,5 @@
+{
+  "channel": "share",
+  "rule": "ctt-pickup-reminder",
+  "fields": { "code_expires_at": "2026-10-24", "courier": "CTT" }
+}

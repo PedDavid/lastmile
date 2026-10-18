@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use lastmile::config::Config;
 use lastmile::db::Db;
 use lastmile::demo;
-use lastmile::metrics::Metrics;
+use lastmile::sweep;
 use lastmile::web::auth::AuthMode;
 use lastmile::web::{self, AppState};
 
@@ -29,8 +29,14 @@ async fn main() -> anyhow::Result<()> {
     let auth = AuthMode::from_config(&cfg.auth, &cfg.public_url, demo_dev_auth)?;
     let cookie_key = load_cookie_key(&cfg)?;
 
-    let ops = web::ops_router(db.clone(), Metrics::new(db.clone()));
-    let state = AppState::new(cfg.clone(), db, auth, cookie_key);
+    tokio::spawn(sweep::run(
+        db.clone(),
+        sweep::Retention {
+            archive_after: cfg.archive_after,
+        },
+    ));
+    let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key);
+    let ops = web::ops_router(db, state.inner.metrics.clone());
     let app = web::router(state);
 
     let ui_listener = tokio::net::TcpListener::bind(cfg.listen).await?;

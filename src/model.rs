@@ -154,6 +154,52 @@ impl Source {
     }
 }
 
+/// How a message came in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    /// An `.eml` file dropped on the inbox.
+    #[serde(alias = "email")]
+    Upload,
+    /// Shared from a phone: the PWA share target.
+    Share,
+    /// The ingest API (the iOS Shortcut).
+    Api,
+    /// The inbox's paste box.
+    Paste,
+}
+
+impl Channel {
+    pub const ALL: [Channel; 4] = [
+        Channel::Upload,
+        Channel::Share,
+        Channel::Api,
+        Channel::Paste,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Upload => "upload",
+            Channel::Share => "share",
+            Channel::Api => "api",
+            Channel::Paste => "paste",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Channel> {
+        Channel::ALL.into_iter().find(|c| c.as_str() == s)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Channel::Upload => "Email",
+            Channel::Share => "Shared",
+            Channel::Api => "Shortcut",
+            Channel::Paste => "Pasted",
+        }
+    }
+}
+
 /// What the code is for: given to the courier at the door, or typed at a
 /// locker or shown at a shop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +298,42 @@ impl Package {
             return Some(format!("No news for {}", humanize(quiet)));
         }
         None
+    }
+
+    /// Whether a status reported by a message at `at` replaces the current
+    /// one: only newer news, and only forwards, except into and out of
+    /// `exception`. (Manual changes skip this and always apply.)
+    pub fn accepts(&self, status: Status, at: Timestamp) -> bool {
+        if at < self.status_at || status == self.status {
+            return false;
+        }
+        match (self.status.rank(), status.rank()) {
+            (Some(current), Some(new)) => new > current,
+            _ => true,
+        }
+    }
+
+    /// The editable part of the package.
+    pub fn to_new(&self) -> NewPackage {
+        NewPackage {
+            title: self.title.clone(),
+            merchant: self.merchant.clone(),
+            recipient: self.recipient.clone(),
+            courier: self.courier.clone(),
+            tracking_number: self.tracking_number.clone(),
+            order_ref: self.order_ref.clone(),
+            tracking_url: self.tracking_url.clone(),
+            status: self.status,
+            status_source: self.status_source,
+            status_at: self.status_at,
+            eta_from: self.eta_from,
+            eta_to: self.eta_to,
+            code: self.code.clone(),
+            code_kind: self.code_kind,
+            code_expires_at: self.code_expires_at,
+            pickup_point: self.pickup_point.clone(),
+            notes: self.notes.clone(),
+        }
     }
 
     /// The filter chip this package is counted under (besides *needs
@@ -354,6 +436,9 @@ mod tests {
         assert_eq!(Status::parse("lost"), None);
         assert_eq!(CodeKind::parse("pickup"), Some(CodeKind::Pickup));
         assert_eq!(Source::parse("manual"), Some(Source::Manual));
+        for c in Channel::ALL {
+            assert_eq!(Channel::parse(c.as_str()), Some(c));
+        }
     }
 
     #[test]
@@ -407,6 +492,28 @@ mod tests {
             pickup(-1).attention(now, week).as_deref(),
             Some("Pickup period over")
         );
+    }
+
+    #[test]
+    fn messages_only_move_status_forward() {
+        let now: Timestamp = "2026-10-18T12:00:00Z".parse().unwrap();
+        let later = now + SignedDuration::from_hours(1);
+        let earlier = now - SignedDuration::from_hours(1);
+        let p = |status| Package {
+            status,
+            status_at: now,
+            ..sample(now)
+        };
+        assert!(p(Status::InTransit).accepts(Status::ReadyForPickup, later));
+        assert!(!p(Status::ReadyForPickup).accepts(Status::InTransit, later));
+        assert!(
+            !p(Status::InTransit).accepts(Status::Delivered, earlier),
+            "old news"
+        );
+        assert!(!p(Status::InTransit).accepts(Status::InTransit, later));
+        assert!(p(Status::InTransit).accepts(Status::Exception, later));
+        assert!(p(Status::Exception).accepts(Status::InTransit, later));
+        assert_eq!(p(Status::Delivered).to_new().status, Status::Delivered);
     }
 
     #[test]

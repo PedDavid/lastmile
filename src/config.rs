@@ -42,6 +42,15 @@ pub struct Config {
     #[arg(long, env = "LASTMILE_STALE_AFTER", default_value = "7d", value_parser = parse_duration)]
     pub stale_after: SignedDuration,
 
+    /// Delivered packages are archived this long after delivery.
+    #[arg(long, env = "LASTMILE_ARCHIVE_AFTER", default_value = "7d", value_parser = parse_duration)]
+    pub archive_after: SignedDuration,
+
+    /// The text of a message (personal data) is deleted this long after it
+    /// came in; the package it updated and the inbox result stay.
+    #[arg(long, env = "LASTMILE_MESSAGE_RETENTION", default_value = "30d", value_parser = parse_duration)]
+    pub message_retention: SignedDuration,
+
     #[command(flatten)]
     pub auth: AuthConfig,
 
@@ -121,8 +130,14 @@ impl Config {
         if self.auth.session_ttl.is_negative() || self.auth.session_ttl.is_zero() {
             return Err("--session-ttl must be positive".into());
         }
-        if self.stale_after.is_negative() || self.stale_after.is_zero() {
-            return Err("--stale-after must be positive".into());
+        for (flag, d) in [
+            ("--stale-after", self.stale_after),
+            ("--archive-after", self.archive_after),
+            ("--message-retention", self.message_retention),
+        ] {
+            if d.is_negative() || d.is_zero() {
+                return Err(format!("{flag} must be positive"));
+            }
         }
         Ok(())
     }
@@ -143,6 +158,15 @@ mod tests {
         assert!(cfg.check().is_ok());
         assert_eq!(cfg.public_origin(), "http://localhost:8080");
         assert_eq!(cfg.database, PathBuf::from("/data/lastmile.db"));
+    }
+
+    #[test]
+    fn retention_must_be_positive() {
+        let cfg = Config::try_parse_from(["lastmile", "--message-retention", "0d"]).unwrap();
+        assert_eq!(
+            cfg.check().unwrap_err(),
+            "--message-retention must be positive"
+        );
     }
 
     #[test]

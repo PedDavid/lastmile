@@ -1,0 +1,90 @@
+<div class="flex flex-col gap-4">
+  {% if !errors.is_empty() %}
+  <div class="alert" data-variant="destructive" role="alert">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>The rule has problems</h2>
+    <section><ul class="list-disc ps-4 font-mono text-xs">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></section>
+  </div>
+  {% else %}
+  <div class="card">
+    <header>
+      <h2>Test message</h2>
+    </header>
+    <section class="flex flex-col gap-2 text-sm">
+      {% if let Some(t) = test %}
+      {% if t.matches %}
+      <p class="flex items-center gap-1 font-medium {% if t.error.is_empty() %}text-(--status-delivered){% else %}text-destructive{% endif %} [&>svg]:size-4">
+        {% if t.error.is_empty() %}{% include "icons/circle-check.svg" %} Matches{% else %}{% include "icons/circle-x.svg" %} Matches, but: {{ t.error }}{% endif %}
+      </p>
+      {% if !t.fields.is_empty() %}<dl class="fields">{% for f in t.fields %}<dt>{{ f.name }}</dt><dd>{{ f.value }}</dd>{% endfor %}</dl>{% endif %}
+      {% else %}
+      <p class="flex items-center gap-1 text-muted-foreground [&>svg]:size-4">{% include "icons/circle-x.svg" %} Doesn't match.</p>
+      {% endif %}
+      {% if !t.winner.is_empty() %}<p class="text-destructive">With all the rules, <em>{{ t.winner }}</em> takes it instead (higher priority or more specific).</p>{% endif %}
+      {% else %}
+      <p class="text-muted-foreground">Paste a message on the left to see what the rule reads from it.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="card">
+    <header>
+      <h2>Samples</h2>
+      <p>This rule's samples, and any other rule's that this change affects.</p>
+    </header>
+    <section>
+      {% if samples.is_empty() %}
+      <p class="text-sm text-muted-foreground">None yet. Keep a test message as a sample when saving.</p>
+      {% else %}
+      <ul class="flex flex-col gap-3 text-sm">
+        {% for s in samples %}
+        <li class="flex flex-col gap-1">
+          <div class="flex items-center gap-2">
+            {% if s.passes %}<span class="badge status-badge" data-status="delivered"><span class="status-dot"></span>passes</span>
+            {% else if s.conflict %}<span class="badge" data-variant="destructive">changes</span>
+            {% else %}<span class="badge" data-variant="outline">fails</span>{% endif %}
+            {% if !s.own %}<span class="text-xs text-muted-foreground">of <em>{{ s.rule }}</em></span>{% endif %}
+            {% if s.own && !rule_id.is_empty() %}
+            <form method="post" action="/rules/{{ rule_id }}/samples/{{ s.id }}/delete" class="ms-auto">
+              <input type="hidden" name="_csrf" value="{{ csrf }}">
+              <button type="submit" class="btn" data-variant="ghost" data-size="sm" aria-label="Delete sample">{% include "icons/trash-2.svg" %}</button>
+            </form>
+            {% endif %}
+          </div>
+          <p class="font-mono text-xs text-muted-foreground">{{ s.text }}</p>
+          {% if !s.passes %}
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div><p class="text-xs font-medium">Expected</p><dl class="fields">{% for f in s.expected %}<dt>{{ f.name }}</dt><dd>{{ f.value }}</dd>{% endfor %}</dl></div>
+            <div><p class="text-xs font-medium">Now{% if !s.got_rule.is_empty() %} ({{ s.got_rule }}){% endif %}</p>{% if !s.error.is_empty() %}<p class="text-xs text-destructive">{{ s.error }}</p>{% endif %}<dl class="fields">{% for f in s.got %}<dt>{{ f.name }}</dt><dd>{{ f.value }}</dd>{% endfor %}</dl></div>
+          </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="card">
+    <header>
+      <h2>In the inbox</h2>
+      <p>Waiting messages this rule would read.</p>
+    </header>
+    <section>
+      {% if inbox.is_empty() %}
+      <p class="text-sm text-muted-foreground">None.</p>
+      {% else %}
+      <ul class="flex flex-col gap-3 text-sm">
+        {% for m in inbox %}
+        <li class="flex flex-col gap-1">
+          <a class="font-mono text-xs text-muted-foreground hover:underline" href="/inbox#message-{{ m.id }}">{{ m.text }}</a>
+          {% if !m.error.is_empty() %}<p class="text-xs text-destructive">{{ m.error }}</p>{% endif %}
+          <dl class="fields">{% for f in m.fields %}<dt>{{ f.name }}</dt><dd>{{ f.value }}</dd>{% endfor %}</dl>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+  </div>
+  {% endif %}
+</div>
