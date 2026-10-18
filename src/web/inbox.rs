@@ -135,6 +135,7 @@ struct InboxPage {
     uploads: Vec<UploadRow>,
     notice: String,
     max_files: usize,
+    llm_enabled: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -186,6 +187,7 @@ async fn inbox_page(
             uploads,
             notice,
             max_files: MAX_FILES,
+            llm_enabled: state.inner.llm.is_some(),
         }
         .render()?,
     )

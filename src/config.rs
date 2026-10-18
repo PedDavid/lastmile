@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, ValueEnum};
 use jiff::SignedDuration;
 use url::Url;
 
@@ -53,6 +53,9 @@ pub struct Config {
 
     #[command(flatten)]
     pub auth: AuthConfig,
+
+    #[command(flatten)]
+    pub llm: LlmConfig,
 
     /// Serve sample packages from a temporary in-memory database. Uses
     /// --insecure-dev-auth unless OIDC is configured. For trying out the UI only.
@@ -108,6 +111,64 @@ pub struct AuthConfig {
     pub insecure_dev_auth: bool,
 }
 
+/// The model that drafts rules: anything that speaks OpenAI's API, which is
+/// OpenAI itself and most self-hosted servers (Ollama, vLLM, llama.cpp,
+/// LM Studio). Off unless `--llm-model` is set.
+#[derive(clap::Args, Debug, Clone)]
+pub struct LlmConfig {
+    /// Model that drafts rules from inbox messages. Setting it turns the
+    /// feature on for admins.
+    #[arg(long, env = "LASTMILE_LLM_MODEL")]
+    pub llm_model: Option<String>,
+
+    /// Base URL of the API (the part before `/chat/completions`). Fixed by
+    /// the deployment: it is never taken from a request.
+    #[arg(
+        long,
+        env = "LASTMILE_LLM_BASE_URL",
+        default_value = "https://api.openai.com/v1"
+    )]
+    pub llm_base_url: Url,
+
+    /// File containing the API key. Optional for a self-hosted server
+    /// without authentication.
+    #[arg(long, env = "LASTMILE_LLM_API_KEY_FILE")]
+    pub llm_api_key_file: Option<PathBuf>,
+
+    /// Which endpoint to call: Chat Completions (what self-hosted servers
+    /// speak) or the Responses API (what some newer OpenAI models need).
+    #[arg(long, env = "LASTMILE_LLM_API", value_enum, default_value = "chat")]
+    pub llm_api: LlmApi,
+
+    /// How the reply is constrained to a rule: a strict JSON Schema, any JSON
+    /// object, or nothing (the prompt asks for JSON). Servers that don't
+    /// support schemas need `json` or `none`.
+    #[arg(
+        long,
+        env = "LASTMILE_LLM_STRUCTURED",
+        value_enum,
+        default_value = "schema"
+    )]
+    pub llm_structured: LlmStructured,
+
+    /// Timeout of each request to the model.
+    #[arg(long, env = "LASTMILE_LLM_TIMEOUT", default_value = "120s", value_parser = parse_duration)]
+    pub llm_timeout: SignedDuration,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LlmApi {
+    Chat,
+    Responses,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LlmStructured {
+    Schema,
+    Json,
+    None,
+}
+
 fn parse_duration(s: &str) -> Result<SignedDuration, String> {
     duration::parse(s).map_err(|e| e.to_string())
 }
@@ -130,7 +191,11 @@ impl Config {
         if self.auth.session_ttl.is_negative() || self.auth.session_ttl.is_zero() {
             return Err("--session-ttl must be positive".into());
         }
+        if !matches!(self.llm.llm_base_url.scheme(), "http" | "https") {
+            return Err("--llm-base-url must be an http(s) URL".into());
+        }
         for (flag, d) in [
+            ("--llm-timeout", self.llm.llm_timeout),
             ("--stale-after", self.stale_after),
             ("--archive-after", self.archive_after),
             ("--message-retention", self.message_retention),
@@ -158,6 +223,32 @@ mod tests {
         assert!(cfg.check().is_ok());
         assert_eq!(cfg.public_origin(), "http://localhost:8080");
         assert_eq!(cfg.database, PathBuf::from("/data/lastmile.db"));
+    }
+
+    #[test]
+    fn the_llm_is_off_until_a_model_is_set() {
+        let cfg = Config::try_parse_from(["lastmile"]).unwrap();
+        assert!(cfg.llm.llm_model.is_none());
+        assert_eq!(cfg.llm.llm_base_url.as_str(), "https://api.openai.com/v1");
+        assert_eq!(cfg.llm.llm_api, LlmApi::Chat);
+        assert_eq!(cfg.llm.llm_structured, LlmStructured::Schema);
+        let cfg = Config::try_parse_from([
+            "lastmile",
+            "--llm-model",
+            "qwen3-coder",
+            "--llm-base-url",
+            "http://ollama.svc:11434/v1",
+            "--llm-api",
+            "responses",
+            "--llm-structured",
+            "none",
+        ])
+        .unwrap();
+        assert_eq!(cfg.llm.llm_model.as_deref(), Some("qwen3-coder"));
+        assert_eq!(cfg.llm.llm_structured, LlmStructured::None);
+        assert!(cfg.check().is_ok());
+        let cfg = Config::try_parse_from(["lastmile", "--llm-base-url", "ftp://x"]).unwrap();
+        assert!(cfg.check().is_err());
     }
 
     #[test]

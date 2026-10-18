@@ -6,7 +6,10 @@
       <h1 class="text-2xl font-semibold tracking-tight">Rules</h1>
       <p class="text-muted-foreground text-sm">Each rule reads one kind of message: when it matches, it finds or creates the package and updates it.</p>
     </div>
-    <a class="btn" href="/rules/new">{% include "icons/plus.svg" %} New rule</a>
+    <div class="flex gap-2">
+      <a class="btn" data-variant="outline" href="/rules/import">{% include "icons/upload.svg" %} Import</a>
+      <a class="btn" href="/rules/new">{% include "icons/plus.svg" %} New rule</a>
+    </div>
   </div>
 
   {% if rows.is_empty() %}
@@ -14,7 +17,7 @@
     <header>
       <figure>{% include "icons/workflow.svg" %}</figure>
       <h3>No rules yet</h3>
-      <p>None come with the app. Start from a message in the <a class="underline underline-offset-4" href="/inbox">inbox</a>{% if inbox > 0 %} ({{ inbox }} waiting){% endif %}: <em>Build rule</em> opens the editor with it, or write one from scratch.</p>
+      <p>None come with the app. Start from a message in the <a class="underline underline-offset-4" href="/inbox">inbox</a>{% if inbox > 0 %} ({{ inbox }} waiting){% endif %}: <em>Build rule</em> opens the editor with it, or write one from scratch, or <a class="underline underline-offset-4" href="/rules/import">import</a> one someone shared.</p>
     </header>
   </div>
   {% else %}

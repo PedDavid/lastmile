@@ -39,6 +39,17 @@ pub async fn open(path: &str, cookies: &[(&str, &str)]) -> Ui {
     open_app(path, cookies, DESKTOP, crate::common::demo_app_at(ORIGIN)).await
 }
 
+/// Like [`open`], with the rule-drafting model at `llm_url`.
+pub async fn open_llm(path: &str, llm_url: &str) -> Ui {
+    open_app(
+        path,
+        &[],
+        DESKTOP,
+        crate::common::demo_app_llm(ORIGIN, llm_url),
+    )
+    .await
+}
+
 pub async fn open_phone(path: &str, cookies: &[(&str, &str)]) -> Ui {
     open_app(path, cookies, PHONE, crate::common::demo_app_at(ORIGIN)).await
 }

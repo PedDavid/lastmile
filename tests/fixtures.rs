@@ -95,5 +95,5 @@ fn every_fixture_gives_its_expected_fields() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 8);
+    assert_eq!(checked, 9);
 }

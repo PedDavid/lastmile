@@ -10,12 +10,30 @@
       <p class="text-muted-foreground text-sm">{% if let Some(r) = rule %}Version {{ r.version }}{% if !r.enabled %} · disabled{% endif %}. {% endif %}The preview updates as you type; saving re-runs every rule's samples and the inbox.</p>
     </div>
     {% if let Some(r) = rule %}
-    <form method="post" action="/rules/{{ r.id }}/toggle">
-      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
-      <button type="submit" class="btn" data-variant="outline">{% if r.enabled %}Disable{% else %}Enable{% endif %}</button>
-    </form>
+    <div class="flex gap-2">
+      <a class="btn" data-variant="outline" href="/rules/{{ r.id }}/export">{% include "icons/link.svg" %} Share</a>
+      <form method="post" action="/rules/{{ r.id }}/toggle">
+        <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+        <button type="submit" class="btn" data-variant="outline">{% if r.enabled %}Disable{% else %}Enable{% endif %}</button>
+      </form>
+    </div>
     {% endif %}
   </div>
+
+  {% if !form.explanation.is_empty() %}
+  <div class="alert" role="status">
+    {% include "icons/workflow.svg" %}
+    <h2>Drafted by {% if let Some(m) = form.drafted_by %}{{ m }}{% else %}the model{% endif %}</h2>
+    <section>{{ form.explanation }} Review it: it is only saved when you save it.</section>
+  </div>
+  {% endif %}
+  {% if !form.problems.is_empty() %}
+  <div class="alert" data-variant="destructive" role="alert">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>The draft still has problems after the automatic retries</h2>
+    <section><ul class="list-disc ps-4 text-sm">{% for p in form.problems %}<li>{{ p }}</li>{% endfor %}</ul></section>
+  </div>
+  {% endif %}
 
   {% if !notice.is_empty() %}
   <div class="alert"{% if needs_confirm || notice.contains(':') %} data-variant="destructive" role="alert"{% else %} role="status"{% endif %}>
@@ -47,6 +65,10 @@
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" class="input" name="add_sample" value="1" {% if form.add_sample.is_some() %}checked{% endif %}>
         Keep this message as a sample (checked on every save)
+      </label>
+      <label class="flex items-center gap-2 text-sm text-muted-foreground">
+        <input type="checkbox" class="input" name="keep_original" value="1" {% if form.keep_original.is_some() %}checked{% endif %}>
+        Store the sample as it is: by default it is saved redacted (the household values replaced)
       </label>
       {% if needs_confirm %}
       <label class="flex items-center gap-2 text-sm font-medium text-destructive">

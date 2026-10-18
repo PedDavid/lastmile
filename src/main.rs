@@ -35,7 +35,11 @@ async fn main() -> anyhow::Result<()> {
             archive_after: cfg.archive_after,
         },
     ));
-    let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key);
+    let llm = lastmile::llm::Client::from_config(&cfg.llm)?;
+    if let Some(llm) = &llm {
+        info!(model = llm.model(), host = %llm.host(), "rule drafting is on");
+    }
+    let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key).with_llm(llm);
     let ops = web::ops_router(db, state.inner.metrics.clone());
     let app = web::router(state);
 

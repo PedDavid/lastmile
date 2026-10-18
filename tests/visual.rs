@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use playwright_rs::protocol::Page;
 use playwright_rs::{Animations, ScreenshotAssertionOptions, expect, expect_page};
-use ui::{open, open_phone};
+use ui::{open, open_llm, open_phone};
 
 /// Compares the viewport with `tests/screenshots/{name}.png`. A missing
 /// baseline fails rather than being written, unless `UPDATE_SNAPSHOTS` is set;
@@ -216,4 +216,118 @@ async fn settings_devices() {
         .await
         .unwrap();
     assert_screenshot(&ui.page, "settings-devices").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn draft_page_shows_what_would_be_sent() {
+    // Message 6 names the household, its address, phone and email.
+    let ui = open("/rules/draft?message=6", &[]).await;
+    assert_screenshot(&ui.page, "draft-rule").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn drafted_rule_in_the_editor() {
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let draft = json!({
+        "explanation": "Paack's text the day before delivery: it names the order and the four digit code to give the courier.",
+        "slug": "paack-delivery-tomorrow",
+        "name": "Paack – delivery tomorrow (SMS)",
+        "courier": "Paack",
+        "channels": ["share", "paste"],
+        "sender": [],
+        "all": ["(?i)paack", "(?i)entregue amanh[ãa]"],
+        "none": [],
+        "extract": [
+            {"field": "tracking_number", "pattern": "(?i)encomenda (?P<v>PCK[A-Z0-9]+)"},
+            {"field": "merchant", "pattern": "(?i)encomenda PCK[A-Z0-9]+ da (?P<v>\\p{Lu}[\\p{L}]+)"},
+            {"field": "code", "pattern": "(?i)c[oó]digo de entrega (?P<v>\\d{4})"},
+        ],
+        "status": "in_transit",
+        "code_kind": "delivery",
+        "priority": 100,
+        "follow_up": false,
+    });
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": draft.to_string()}}],
+            "usage": {"prompt_tokens": 812, "completion_tokens": 190},
+        })))
+        .mount(&server)
+        .await;
+    let ui = open_llm("/rules/draft?message=6", &format!("{}/v1", server.uri())).await;
+    ui.page
+        .locator("input[name=hint]")
+        .fill(
+            "Paack, delivery tomorrow: the 4 digits are the code for the courier",
+            None,
+        )
+        .await
+        .unwrap();
+    ui.page
+        .locator("button[value=send]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("#preview .card").first())
+        .to_be_visible()
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "draft-editor").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn export_a_rule() {
+    let id = lastmile::demo::rule_id("paack-out-for-delivery");
+    let ui = open(&format!("/rules/{id}/export"), &[]).await;
+    assert_screenshot(&ui.page, "rule-export").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn import_preview_of_an_update() {
+    use lastmile::rules::share;
+    // A newer copy of the demo's Paack rule: it also excludes "tomorrow".
+    let mut doc = share::parse(include_str!(
+        "fixtures/shared/paack-out-for-delivery.lastmile.yaml"
+    ))
+    .unwrap();
+    doc.id = lastmile::demo::rule_id("paack-out-for-delivery");
+    doc.version = 4;
+    doc.def.priority = 120;
+    doc.def.matcher.none = vec!["(?i)amanh[ãa]".into()];
+    let ui = open("/rules/import", &[]).await;
+    ui.page
+        .locator("textarea[name=text]")
+        .fill(&doc.to_yaml(), None)
+        .await
+        .unwrap();
+    ui.page
+        .locator("form[action='/rules/import'] button[type=submit]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator(".diff"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "rule-import").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn settings_household() {
+    let ui = open("/settings", &[]).await;
+    ui.page
+        .evaluate_expression("document.getElementById('names').scrollIntoView({block: 'start'})")
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "settings-household").await;
 }

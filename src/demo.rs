@@ -6,8 +6,10 @@ use rusqlite::Connection;
 use crate::db::messages::{self, MessageResult, NewMessage, ResultUpdate};
 use crate::db::packages;
 use crate::db::rules::{self as rule_db, Origin};
+use crate::db::settings;
 use crate::ingest::{self, Incoming};
 use crate::model::{Channel, CodeKind, NewPackage, PickupPoint, Source, Status};
+use crate::redact::Household;
 use crate::rules::engine::{self, Input, Outcome};
 use crate::rules::schema::RuleDef;
 
@@ -176,7 +178,19 @@ pub fn load(conn: &mut Connection, now: Timestamp) -> rusqlite::Result<()> {
     load_rules_and_messages(conn, now)
 }
 
+/// The made-up household of the demo: what its messages mention.
+pub fn household() -> Household {
+    Household {
+        names: vec!["Ana Ferreira".into(), "Ana".into(), "David".into()],
+        addresses: vec!["Avenida da Liberdade 10".into()],
+        postcodes: vec!["1250-096".into()],
+        phones: vec!["912345678".into()],
+        emails: vec!["ana@example.com".into()],
+    }
+}
+
 fn load_rules_and_messages(conn: &mut Connection, now: Timestamp) -> rusqlite::Result<()> {
+    settings::set_household(conn, &household())?;
     let samples: [(&str, Channel, &str); 3] = [
         (
             "ctt-ready-for-pickup",
@@ -274,7 +288,12 @@ fn load_rules_and_messages(conn: &mut Connection, now: Timestamp) -> rusqlite::R
     // Messages waiting in the inbox: one no rule reads, an email from a
     // shop, a pickup notice without a tracking number, and a reminder that
     // doesn't say which package it is about.
-    let inbox: [(i64, Channel, &str); 4] = [
+    let inbox: [(i64, Channel, &str); 5] = [
+        (
+            1,
+            Channel::Share,
+            include_str!("../tests/fixtures/messages/paack-delivery-with-details.txt"),
+        ),
         (
             2,
             Channel::Share,
@@ -388,6 +407,7 @@ mod tests {
         assert_eq!(
             results,
             [
+                MessageResult::Unmatched,
                 MessageResult::Unmatched,
                 MessageResult::Unmatched,
                 MessageResult::Error,

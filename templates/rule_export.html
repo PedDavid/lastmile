@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto flex max-w-3xl flex-col gap-6">
+  <a href="/rules/{{ id }}" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
+    {% include "icons/chevron-left.svg" %} {{ name }}
+  </a>
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Share a rule</h1>
+    <p class="text-muted-foreground text-sm">This is everything that leaves: the rule, and {{ samples }} sample{% if samples != 1 %}s{% endif %} with the household values replaced. Whoever imports it gets it disabled, to look at first.</p>
+  </div>
+
+  {% if household_empty %}
+  <div class="alert" role="status">
+    {% include "icons/info.svg" %}
+    <h2>No household values are set, so the samples are only redacted by format. Add yours in <a class="underline underline-offset-4" href="/settings">Settings</a> before sharing.</h2>
+  </div>
+  {% endif %}
+  {% if dropped > 0 %}
+  <div class="alert" role="status">
+    {% include "icons/info.svg" %}
+    <h2>{{ dropped }} sample{% if dropped != 1 %}s were{% else %} was{% endif %} left out: the rule no longer reads {% if dropped != 1 %}them{% else %}it{% endif %} once redacted.</h2>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <header>
+      <h2>As text</h2>
+      <p>Paste it anywhere, or send the file.</p>
+    </header>
+    <section class="flex flex-col gap-3">
+      <textarea class="textarea w-full font-mono text-xs" rows="16" readonly spellcheck="false" aria-label="Rule document" id="yaml">{{ yaml }}</textarea>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn" data-copy-from="yaml">{% include "icons/copy.svg" %} Copy text</button>
+        <a class="btn" data-variant="outline" href="/rules/{{ id }}/export.yaml">{% include "icons/upload.svg" %} Download {{ file_name }}</a>
+      </div>
+    </section>
+  </div>
+
+  <div class="card">
+    <header>
+      <h2>As one line</h2>
+      <p>The same, compressed, for chat apps that mangle multi-line text. Importing reads either.</p>
+    </header>
+    <section class="flex flex-col gap-3">
+      <textarea class="textarea w-full font-mono text-xs break-all" rows="4" readonly spellcheck="false" aria-label="One-line blob" id="blob">{{ blob }}</textarea>
+      <div><button type="button" class="btn" data-copy-from="blob">{% include "icons/copy.svg" %} Copy one-line version</button></div>
+    </section>
+  </div>
+</div>
+{% endblock %}

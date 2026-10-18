@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto flex max-w-3xl flex-col gap-6">
+  <a href="/rules/import" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
+    {% include "icons/chevron-left.svg" %} Import
+  </a>
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">{{ name }}</h1>
+    <p class="text-muted-foreground text-sm">
+      {% if let Some(old) = updates %}Updates your rule <em>{{ old }}</em> (version {{ current_version }}; this copy is version {{ incoming_version }}).{% else %}A new rule{% if !courier.is_empty() %} for {{ courier }}{% endif %}.{% endif %}
+      Priority {{ priority }}, <code>{{ slug }}</code>.
+    </p>
+  </div>
+
+  <div class="alert" role="status">
+    {% include "icons/info.svg" %}
+    <h2>It is saved disabled{% if updates.is_some() %}, even though it replaces a rule{% endif %}: look it over in the editor, then enable it.</h2>
+  </div>
+
+  {% if updates.is_some() %}
+  <div class="card">
+    <header>
+      <h2>What changes</h2>
+      {% if !changed %}<p>Nothing: the rule is the same as yours (its samples are still added).</p>{% endif %}
+    </header>
+    {% if changed %}
+    <section>
+      <pre class="diff">{% for l in diff %}<span class="diff-line" data-sign="{{ l.sign }}">{{ l.sign }} {{ l.text }}
+</span>{% endfor %}</pre>
+    </section>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <header>
+      <h2>Samples</h2>
+      <p>Each must give the fields it says, with this rule.</p>
+    </header>
+    <section>
+      {% if samples.is_empty() %}
+      <p class="text-sm text-muted-foreground">No samples came with it.</p>
+      {% else %}
+      <ul class="flex flex-col gap-3 text-sm">
+        {% for s in samples %}
+        <li class="flex flex-col gap-1">
+          <div>{% if s.ok %}<span class="badge status-badge" data-status="delivered"><span class="status-dot"></span>passes</span>{% else %}<span class="badge" data-variant="destructive">fails</span>{% endif %}</div>
+          <p class="font-mono text-xs text-muted-foreground">{{ s.text }}</p>
+          {% if s.ok %}
+          <dl class="fields">{% for (k, v) in s.got %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+          {% else %}
+          {% if !s.error.is_empty() %}<p class="text-xs text-destructive">{{ s.error }}</p>{% endif %}
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div><p class="text-xs font-medium">Expected</p><dl class="fields">{% for (k, v) in s.expected %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></div>
+            <div><p class="text-xs font-medium">Got</p><dl class="fields">{% for (k, v) in s.got %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></div>
+          </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="card">
+    <header>
+      <h2>In your inbox</h2>
+      <p>Waiting messages it would read once enabled.</p>
+    </header>
+    <section>
+      {% if inbox.is_empty() %}
+      <p class="text-sm text-muted-foreground">None.</p>
+      {% else %}
+      <ul class="flex flex-col gap-3 text-sm">
+        {% for m in inbox %}
+        <li class="flex flex-col gap-1">
+          <p class="font-mono text-xs text-muted-foreground">{{ m.text }}</p>
+          <dl class="fields">{% for (k, v) in m.fields %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+  </div>
+
+  <form method="post" action="/rules/import/confirm" class="flex justify-end gap-2">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <input type="hidden" name="source" value="{{ source }}">
+    <a class="btn" data-variant="outline" href="/rules/import">Cancel</a>
+    <button type="submit" class="btn" {% if !samples_pass %}disabled title="A sample fails"{% endif %}>Import, disabled</button>
+  </form>
+</div>
+{% endblock %}

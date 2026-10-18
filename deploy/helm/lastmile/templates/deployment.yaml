@@ -68,6 +68,22 @@ spec:
             - name: LASTMILE_SESSION_TTL
               value: {{ .Values.oidc.sessionTtl | quote }}
             {{- end }}
+            {{- if .Values.llm.model }}
+            - name: LASTMILE_LLM_MODEL
+              value: {{ .Values.llm.model | quote }}
+            - name: LASTMILE_LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: LASTMILE_LLM_API
+              value: {{ .Values.llm.api | quote }}
+            - name: LASTMILE_LLM_STRUCTURED
+              value: {{ .Values.llm.structured | quote }}
+            - name: LASTMILE_LLM_TIMEOUT
+              value: {{ .Values.llm.timeout | quote }}
+            {{- if .Values.llm.apiKey.existingSecret }}
+            - name: LASTMILE_LLM_API_KEY_FILE
+              value: /etc/lastmile/llm/{{ .Values.llm.apiKey.key }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.logJson }}
             - name: LASTMILE_LOG_JSON
               value: "true"
@@ -103,6 +119,11 @@ spec:
               mountPath: /etc/lastmile/oidc
               readOnly: true
             {{- end }}
+            {{- if and .Values.llm.model .Values.llm.apiKey.existingSecret }}
+            - name: llm
+              mountPath: /etc/lastmile/llm
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -114,6 +135,11 @@ spec:
         - name: oidc
           secret:
             secretName: {{ .Values.oidc.clientSecret.existingSecret }}
+        {{- end }}
+        {{- if and .Values.llm.model .Values.llm.apiKey.existingSecret }}
+        - name: llm
+          secret:
+            secretName: {{ .Values.llm.apiKey.existingSecret }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
