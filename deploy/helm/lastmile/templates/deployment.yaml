@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lastmile.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lastmile.labels" . | nindent 4 }}
+spec:
+  # One replica on a ReadWriteOnce volume: SQLite has a single writer, and
+  # Recreate stops the old pod before the new one opens the database.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "lastmile.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lastmile.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "lastmile.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: lastmile
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: LASTMILE_PUBLIC_URL
+              value: {{ required "publicUrl is required" .Values.publicUrl | quote }}
+            - name: LASTMILE_DATABASE
+              value: /data/lastmile.db
+            - name: LASTMILE_COOKIE_KEY_FILE
+              value: /etc/lastmile/cookie/cookie-key
+            {{- if .Values.insecureDevAuth }}
+            - name: LASTMILE_INSECURE_DEV_AUTH
+              value: "true"
+            {{- else }}
+            - name: LASTMILE_OIDC_ISSUER
+              value: {{ required "oidc.issuer is required (or set insecureDevAuth for development)" .Values.oidc.issuer | quote }}
+            - name: LASTMILE_OIDC_CLIENT_ID
+              value: {{ .Values.oidc.clientId | quote }}
+            {{- if .Values.oidc.clientSecret.existingSecret }}
+            - name: LASTMILE_OIDC_CLIENT_SECRET_FILE
+              value: /etc/lastmile/oidc/{{ .Values.oidc.clientSecret.key }}
+            {{- end }}
+            - name: LASTMILE_OIDC_SCOPES
+              value: {{ .Values.oidc.scopes | quote }}
+            - name: LASTMILE_ADMIN_CLAIM
+              value: {{ .Values.oidc.adminClaim | quote }}
+            - name: LASTMILE_ADMIN_VALUE
+              value: {{ .Values.oidc.adminValue | quote }}
+            - name: LASTMILE_SESSION_TTL
+              value: {{ .Values.oidc.sessionTtl | quote }}
+            {{- end }}
+            {{- if .Values.logJson }}
+            - name: LASTMILE_LOG_JSON
+              value: "true"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cookie-key
+              mountPath: /etc/lastmile/cookie
+              readOnly: true
+            {{- if and (not .Values.insecureDevAuth) .Values.oidc.clientSecret.existingSecret }}
+            - name: oidc
+              mountPath: /etc/lastmile/oidc
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "lastmile.claimName" . }}
+        - name: cookie-key
+          secret:
+            secretName: {{ include "lastmile.cookieSecretName" . }}
+        {{- if and (not .Values.insecureDevAuth) .Values.oidc.clientSecret.existingSecret }}
+        - name: oidc
+          secret:
+            secretName: {{ .Values.oidc.clientSecret.existingSecret }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

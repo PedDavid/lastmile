@@ -1,0 +1,19 @@
+# /metrics, /healthz and /readyz have no authentication and expose package
+# counts and states, so they get their own ClusterIP Service that
+# service.type never changes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lastmile.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lastmile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lastmile.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics

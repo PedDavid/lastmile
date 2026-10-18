@@ -1,0 +1,12 @@
+{% if !rows.is_empty() %}
+<div role="group" aria-labelledby="command-packages">
+  <span role="presentation" class="command-heading" id="command-packages">{% if q.is_empty() %}On their way{% else %}Packages{% endif %}</span>
+  {% for row in rows %}
+  <a role="option" id="command-option-{{ loop.index }}" href="{{ row.href() }}" aria-selected="{% if loop.first %}true{% else %}false{% endif %}"{% if loop.first %} class="active"{% endif %}>
+    <span class="status-dot" data-status="{{ row.status_str() }}"></span>
+    <span class="truncate">{{ row.title }}</span>
+    <span class="ms-auto" data-shortcut>{{ row.status_label() }}{% if !row.code.is_empty() %} · {{ row.code }}{% endif %}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
