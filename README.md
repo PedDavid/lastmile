@@ -11,42 +11,42 @@ where it is going.
 |---|---|
 | ![Phone](tests/screenshots/packages-phone.png) | ![Detail](tests/screenshots/detail-pickup.png) |
 
-| The inbox | A rule, built from a message |
+| The inbox | A rule drafted by a model, to review |
 |---|---|
-| ![Inbox](tests/screenshots/inbox.png) | ![Rule editor](tests/screenshots/rule-editor.png) |
+| ![Inbox](tests/screenshots/inbox.png) | ![Drafted rule](tests/screenshots/draft-editor.png) |
 
 ## Status
 
-**M2 – Messages and rules.** Couriers' and shops' messages come in, and
-rules turn them into packages:
+**M3 – Rules with a model, and sharing.** On top of M2 (messages in, rules
+turn them into packages):
 
-- **Channels.** A paste box and an `.eml` dropbox on the inbox page; the
-  Android share sheet (lastmile installs as a PWA share target); an iOS
-  Shortcut posting to `/api/ingest` with a per-person token
-  ([docs/ios-shortcut.md](docs/ios-shortcut.md)).
-- **Rules** are data, not code: match conditions (channel, sender, regexes),
-  regexes that extract fields (tracking number, code, pickup point, dates…)
-  and the status to set. None ship with the app: admins write them in an
-  editor with a live preview, starting from an inbox message. Each rule keeps
-  regression samples; saving re-runs every rule's samples and refuses a change
-  that breaks one unless confirmed, then re-runs the inbox.
-- **Packages** are found by tracking number (or order reference) and
-  updated, or created. Status only moves forward from messages (manual changes
-  always apply), and older news only goes on the timeline.
-- **The inbox** keeps what no rule read, what a rule failed on, and
-  follow-ups that don't say which package: attach them, create a package,
-  build a rule or ignore them.
-- **Retention.** Delivered packages are archived after `--archive-after`
-  (7d), and message text is deleted after `--message-retention` (30d).
+- **Draft a rule with a model.** From an inbox message, an admin can ask a model
+  to write the rule. Anything that goes out is **redacted** first: your
+  household's names, addresses, phone numbers and emails (*Settings →
+  Household*) and anything with a personal format (emails, phones, postcodes,
+  NIFs, IBANs, cards, URL tokens, greetings) become placeholders like
+  `‹NAME_1›`. The admin sees the original next to the redacted text, edits it,
+  and nothing is sent until they click *Send*. A last check refuses any request
+  that still contains a household value. The draft is then validated locally
+  (it compiles, matches the message, and doesn't change other rules' samples),
+  sent back to the model with the problems up to three times, and opened in the
+  editor to review. See [docs/llm.md](docs/llm.md).
+- **Any OpenAI-compatible model**: OpenAI (Chat Completions or the Responses
+  API) or a self-hosted server (Ollama, vLLM, llama.cpp, LM Studio), through
+  `--llm-model` and `--llm-base-url`.
+- **Samples are stored redacted** (unless you choose to keep the original).
+- **Share rules** as a `rule/v1` document: copy the YAML, a one-line blob for
+  chat apps, or download a `.lastmile.yaml`. Samples leave only redacted.
+  **Import** from a paste or a file, with a preview (what it reads, how its
+  samples fare, which inbox messages it would take, a diff if it updates a rule
+  you have). Imported rules are untrusted data, bounded like any rule, and saved
+  **disabled**.
 
-Before that, **M1** made the app useful by hand (add and edit packages, the
-code in large print, filters, a timeline, status overrides, metrics), on
-**M0**'s stack shared with [dominium](https://github.com/PedDavid/dominium)
-and [clavium](https://github.com/PedDavid/clavium) (Rust, axum, askama,
-Tailwind v4, Basecoat, htmx, OIDC) and SQLite.
-
-Next (M3): redaction, drafting rules with an LLM, and sharing rules as text
-or files.
+Before that: **M2** (paste box, `.eml` dropbox, Android share target, iOS
+Shortcut API, rules, inbox), **M1** (add and edit by hand, filters, timeline,
+metrics) and **M0** (the stack shared with
+[dominium](https://github.com/PedDavid/dominium) and
+[clavium](https://github.com/PedDavid/clavium)).
 
 ## Running it
 
@@ -87,6 +87,7 @@ Computed from the database on every scrape.
 | `lastmile_inbox_messages{result}` | Messages waiting in the inbox: `unmatched`, `error`, or `matched` follow-ups to attach |
 | `lastmile_messages_total{channel, result}` | Messages received |
 | `lastmile_rules{origin, enabled}` | |
+| `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | Requests to and tokens used by the model that drafts rules |
 
 ## Kubernetes
 

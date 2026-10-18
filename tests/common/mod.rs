@@ -48,6 +48,33 @@ pub fn harness() -> Harness {
     }
 }
 
+/// [`harness`] with the rule-drafting model at `llm_url` (an OpenAI-style
+/// API, normally a mock).
+pub fn harness_llm(llm_url: &str) -> Harness {
+    let cfg = Config::try_parse_from([
+        "lastmile",
+        "--oidc-issuer",
+        "https://idp.example.com",
+        "--oidc-client-id",
+        "lastmile",
+        "--llm-model",
+        "test-model",
+        "--llm-base-url",
+        llm_url,
+    ])
+    .unwrap();
+    let db = Db::open_in_memory().unwrap();
+    let auth = AuthMode::from_config(&cfg.auth, &cfg.public_url, false).unwrap();
+    let key = Key::generate();
+    let llm = lastmile::llm::Client::from_config(&cfg.llm).unwrap();
+    let state = AppState::new(cfg, db.clone(), auth, key.clone()).with_llm(llm);
+    Harness {
+        app: router(state.with_fixed_now(NOW.parse().unwrap())),
+        db,
+        key,
+    }
+}
+
 pub fn session(admin: bool) -> Session {
     let now = jiff::Timestamp::now().as_second();
     Session {
@@ -82,13 +109,31 @@ pub fn demo_app() -> Router {
 
 /// [`demo_app`] served at `public_url` (the Origin its forms post from).
 pub fn demo_app_at(public_url: &str) -> Router {
+    demo_app_llm(public_url, "http://llm.invalid/v1")
+}
+
+/// [`demo_app_at`] with the rule-drafting model at `llm_url`.
+pub fn demo_app_llm(public_url: &str, llm_url: &str) -> Router {
     let now: jiff::Timestamp = NOW.parse().unwrap();
-    let cfg = Config::try_parse_from(["lastmile", "--demo", "--public-url", public_url]).unwrap();
+    let cfg = Config::try_parse_from([
+        "lastmile",
+        "--demo",
+        "--public-url",
+        public_url,
+        "--llm-model",
+        "demo-model",
+        "--llm-base-url",
+        llm_url,
+    ])
+    .unwrap();
     let db = Db::open_in_memory().unwrap();
     db.blocking(|c| lastmile::demo::load(c, now)).unwrap();
     let auth = AuthMode::InsecureDev {
         csrf: "demo-csrf-token".into(),
     };
-    let state = AppState::new(cfg, db, auth, Key::generate());
+    // A model is "configured" so the draft buttons show; nothing in the
+    // screenshots ever calls it.
+    let llm = lastmile::llm::Client::from_config(&cfg.llm).unwrap();
+    let state = AppState::new(cfg, db, auth, Key::generate()).with_llm(llm);
     router(state.with_fixed_now(now))
 }

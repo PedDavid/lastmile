@@ -3,11 +3,13 @@
 
 mod api;
 pub mod auth;
+mod draft;
 mod forms;
 mod inbox;
 mod pages;
 mod rules;
 mod settings;
+mod share;
 mod views;
 
 pub use forms::parse_date;
@@ -43,6 +45,8 @@ pub struct Inner {
     pub cfg: Config,
     pub db: Db,
     pub metrics: Arc<Metrics>,
+    /// The model that drafts rules; `None` leaves the feature off.
+    pub llm: Option<crate::llm::Client>,
     pub auth: AuthMode,
     pub rate_limiter: api::RateLimiter,
     pub cookie_key: Key,
@@ -57,6 +61,7 @@ impl AppState {
             inner: Arc::new(Inner {
                 cfg,
                 metrics: Metrics::new(db.clone()),
+                llm: None,
                 db,
                 auth,
                 rate_limiter: api::RateLimiter::default(),
@@ -65,6 +70,14 @@ impl AppState {
                 fixed_now: None,
             }),
         }
+    }
+
+    /// Turns rule drafting on with this client.
+    pub fn with_llm(mut self, llm: Option<crate::llm::Client>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("the LLM is set before the state is shared")
+            .llm = llm;
+        self
     }
 
     /// Renders every page as if it were `now`, so output is reproducible.
@@ -284,15 +297,21 @@ pub fn router(state: AppState) -> Router {
         .route("/share", get(inbox::share))
         .route("/rules", get(rules::list).post(rules::create))
         .route("/rules/new", get(rules::new))
+        .route("/rules/draft", get(draft::form).post(draft::draft))
+        .route("/rules/import", get(share::import_form).post(share::import_preview))
+        .route("/rules/import/confirm", post(share::import_confirm))
         .route("/rules/preview", post(rules::preview_new))
         .route("/rules/{id}", get(rules::edit).post(rules::update))
         .route("/rules/{id}/preview", post(rules::preview_existing))
         .route("/rules/{id}/toggle", post(rules::toggle))
+        .route("/rules/{id}/export", get(share::export_page))
+        .route("/rules/{id}/export.yaml", get(share::export_file))
         .route(
             "/rules/{id}/samples/{sample}/delete",
             post(rules::delete_sample),
         )
         .route("/settings", get(settings::settings))
+        .route("/settings/household", post(settings::save_household))
         .route("/settings/tokens", post(settings::create_token))
         .route("/settings/tokens/{id}/revoke", post(settings::revoke_token))
         .route(

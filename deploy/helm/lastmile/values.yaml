@@ -18,6 +18,20 @@ oidc:
   adminValue: lastmile-admins
   sessionTtl: 30d
 
+# The model that drafts rules from inbox messages (docs/llm.md). Off until
+# `model` is set. Any OpenAI-compatible API: OpenAI, or a self-hosted server
+# (Ollama, vLLM, llama.cpp, LM Studio).
+llm:
+  model: ""
+  baseUrl: https://api.openai.com/v1
+  api: chat            # chat | responses
+  structured: schema   # schema | json | none
+  timeout: 120s
+  apiKey:
+    # Secret holding the API key (empty for a server without authentication).
+    existingSecret: ""
+    key: api-key
+
 # Key encrypting session cookies. Generated once and kept across upgrades
 # unless an existing Secret (with key `cookie-key`, >= 64 bytes) is given.
 cookieKey:

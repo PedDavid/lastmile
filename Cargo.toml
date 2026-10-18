@@ -34,6 +34,8 @@ axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-extra = { version = "0.12", features = ["cookie-private", "form"] }
 askama = "0.16"
 time = "0.3"
+flate2 = "1.1.10"
+similar = "3.2.0"
 
 [dev-dependencies]
 chrono = "0.4"

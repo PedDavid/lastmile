@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <a href="/inbox#message-{{ message_id }}" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
+    {% include "icons/chevron-left.svg" %} Inbox
+  </a>
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Draft a rule with a model</h1>
+    <p class="text-muted-foreground text-sm">The model sees only the redacted text on the right. Nothing is sent until you click <em>Send</em>: check it, and edit it if something personal is left.</p>
+  </div>
+
+  {% if !error.is_empty() %}
+  <div class="alert" data-variant="destructive" role="alert">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>{{ error }}</h2>
+  </div>
+  {% endif %}
+
+  {% if household_empty %}
+  <div class="alert" role="status">
+    {% include "icons/info.svg" %}
+    <h2>No household values are set, so only what has a recognisable format is redacted (emails, phone numbers, postcodes, NIFs, IBANs, cards, URL tokens, greetings). Names and addresses need adding in <a class="underline underline-offset-4" href="/settings">Settings</a>.</h2>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/rules/draft" class="flex flex-col gap-4">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <input type="hidden" name="message_id" value="{{ message_id }}">
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="card">
+        <header>
+          <h2>Original</h2>
+          <p>{{ channel }}{% if !sender.is_empty() %} · from {{ sender }}{% endif %}. Stays here.</p>
+        </header>
+        <section>
+          <div class="message-text max-h-80">{{ original }}</div>
+        </section>
+      </div>
+      <div class="card">
+        <header>
+          <h2>Redacted: what is sent</h2>
+          <p>
+            {% if counts.is_empty() %}Nothing was replaced.{% else %}Replaced:
+            {% for (kind, n) in counts %}<span class="badge" data-variant="secondary">{{ n }} {{ kind }}</span> {% endfor %}{% endif %}
+          </p>
+        </header>
+        <section>
+          <textarea name="redacted" rows="9" class="textarea w-full font-mono text-xs" spellcheck="false" aria-label="Redacted message">{{ redacted }}</textarea>
+        </section>
+      </div>
+    </div>
+
+    <div class="card">
+      <section class="flex flex-col gap-4">
+        <div class="field">
+          <label for="hint">What is this message? <span class="text-muted-foreground">(optional, sent too)</span></label>
+          <input id="hint" name="hint" value="{{ hint }}" maxlength="500" placeholder="Paack, out for delivery today: the 4 digits are the code for the courier">
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" class="input" name="redact_codes" value="1" {% if redact_codes %}checked{% endif %}>
+          Also hide the delivery or pickup code (use <em>Redact again</em> after ticking)
+        </label>
+        <p class="flex items-center gap-2 text-sm text-muted-foreground [&>svg]:size-4 [&>svg]:shrink-0">
+          {% include "icons/info.svg" %}
+          <span>Sent to <code>{{ model }}</code> at <code>{{ host }}</code>. Up to three more requests follow if the draft doesn't pass the checks here.</span>
+        </p>
+      </section>
+      <footer class="justify-between">
+        <button type="submit" name="action" value="redact" class="btn" data-variant="outline">Redact again</button>
+        <button type="submit" name="action" value="send" class="btn">{% include "icons/workflow.svg" %} Send and draft</button>
+      </footer>
+    </div>
+  </form>
+</div>
+{% endblock %}

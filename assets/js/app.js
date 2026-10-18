@@ -119,11 +119,15 @@
   });
 
   // Copy buttons: put the code on the clipboard and say so briefly.
+  // `data-copy` holds the text; `data-copy-from` names a field to copy.
   document.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-copy]');
+    const button = event.target.closest('[data-copy], [data-copy-from]');
     if (!button) return;
+    const text = button.dataset.copyFrom
+      ? document.getElementById(button.dataset.copyFrom)?.value ?? ''
+      : button.dataset.copy;
     try {
-      await navigator.clipboard.writeText(button.dataset.copy);
+      await navigator.clipboard.writeText(text);
       button.dataset.copied = 'true';
       setTimeout(() => { delete button.dataset.copied; }, 1500);
     } catch {

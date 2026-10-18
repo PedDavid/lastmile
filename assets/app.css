@@ -103,6 +103,20 @@
     @apply max-h-40 overflow-y-auto rounded-md bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap break-words;
   }
 
+  /* A line diff: what an imported rule changes. */
+  .diff {
+    @apply overflow-x-auto rounded-md bg-muted/60 p-3 font-mono text-xs;
+  }
+  .diff-line {
+    @apply block whitespace-pre-wrap break-all;
+  }
+  .diff-line[data-sign='+'] {
+    @apply bg-(--status-delivered)/15;
+  }
+  .diff-line[data-sign='-'] {
+    @apply bg-(--status-exception)/15;
+  }
+
   .btn[data-copied='true'] {
     @apply text-(--status-delivered);
   }

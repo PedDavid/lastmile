@@ -62,6 +62,7 @@ pub struct Input<'a> {
     pub sent_at: Timestamp,
 }
 
+#[derive(Debug)]
 pub struct CompiledRule {
     pub id: String,
     pub version: i64,

@@ -23,9 +23,21 @@ pub struct MessageLabels {
     pub result: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct ResultLabels {
+    pub result: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct KindLabels {
+    pub kind: String,
+}
+
 pub struct Metrics {
     registry: Registry,
     messages: Family<MessageLabels, Counter>,
+    llm_requests: Family<ResultLabels, Counter>,
+    llm_tokens: Family<KindLabels, Counter>,
 }
 
 impl Metrics {
@@ -47,8 +59,47 @@ impl Metrics {
             "Messages received, by channel and what the rules made of them",
             messages.clone(),
         );
+        let llm_requests = Family::<ResultLabels, Counter>::default();
+        for result in ["ok", "error"] {
+            let _ = llm_requests.get_or_create(&ResultLabels {
+                result: result.into(),
+            });
+        }
+        let llm_tokens = Family::<KindLabels, Counter>::default();
+        for kind in ["input", "output"] {
+            let _ = llm_tokens.get_or_create(&KindLabels { kind: kind.into() });
+        }
+        registry.register(
+            "lastmile_llm_requests",
+            "Requests to the model that drafts rules, by result",
+            llm_requests.clone(),
+        );
+        registry.register(
+            "lastmile_llm_tokens",
+            "Tokens used by the model that drafts rules, by kind (input, output)",
+            llm_tokens.clone(),
+        );
         registry.register_collector(Box::new(PackageCollector { db }));
-        std::sync::Arc::new(Metrics { registry, messages })
+        std::sync::Arc::new(Metrics {
+            registry,
+            messages,
+            llm_requests,
+            llm_tokens,
+        })
+    }
+
+    /// One request to the model.
+    pub fn llm_call(&self, ok: bool, input_tokens: u64, output_tokens: u64) {
+        self.llm_requests
+            .get_or_create(&ResultLabels {
+                result: if ok { "ok" } else { "error" }.into(),
+            })
+            .inc();
+        for (kind, n) in [("input", input_tokens), ("output", output_tokens)] {
+            self.llm_tokens
+                .get_or_create(&KindLabels { kind: kind.into() })
+                .inc_by(n);
+        }
     }
 
     pub fn message(&self, channel: Channel, result: MessageResult) {

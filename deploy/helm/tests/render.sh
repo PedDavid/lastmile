@@ -35,6 +35,18 @@ existing=$(render --set persistence.existingClaim=parcels)
 [[ $(yq 'select(.kind == "Deployment") | .spec.template.spec.volumes[] | select(.name == "data") | .persistentVolumeClaim.claimName' <<<"$existing") == parcels ]] \
   || fail "existingClaim not mounted"
 
+# The model that drafts rules is off by default, and its key is mounted
+# from a Secret as a file when set.
+env=$(yq '.spec.template.spec.containers[0].env[].name' <<<"$deploy")
+grep -q LASTMILE_LLM_MODEL <<<"$env" && fail "the model is on by default"
+llm=$(render --set llm.model=gpt-x --set llm.apiKey.existingSecret=llm-key | yq 'select(.kind == "Deployment")')
+[[ $(yq '.spec.template.spec.containers[0].env[] | select(.name == "LASTMILE_LLM_API_KEY_FILE") | .value' <<<"$llm") == /etc/lastmile/llm/api-key ]] \
+  || fail "the LLM key file is not set"
+[[ $(yq '.spec.template.spec.volumes[] | select(.name == "llm") | .secret.secretName' <<<"$llm") == llm-key ]] \
+  || fail "the LLM key Secret is not mounted"
+nokey=$(render --set llm.model=local --set llm.baseUrl=http://ollama:11434/v1 | yq 'select(.kind == "Deployment")')
+[[ -z $(yq '.spec.template.spec.volumes[] | select(.name == "llm")' <<<"$nokey") ]] || fail "a Secret is mounted without a key"
+
 # The default image tag is the chart's appVersion, which the release
 # workflow publishes (see .github/workflows/release.yml).
 app=$(yq '.appVersion' "$chart/Chart.yaml")

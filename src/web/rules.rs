@@ -20,8 +20,10 @@ use super::views::relative;
 use super::{AppError, AppState};
 use crate::db::messages;
 use crate::db::rules::{self as rule_db, Origin, Sample, StoredRule};
+use crate::db::settings;
 use crate::ingest;
 use crate::model::Channel;
+use crate::redact::{Options, redact, redact_known};
 use crate::rules::engine::{self, CompiledRule, Fields, Input, Outcome};
 use crate::rules::schema::{NEW_RULE, RuleDef};
 use crate::rules::{SampleCheck, check_samples, with_candidate};
@@ -102,24 +104,36 @@ pub async fn list(
 #[derive(Deserialize, Default, Clone)]
 pub struct EditorForm {
     #[serde(rename = "_csrf")]
-    csrf: Option<String>,
+    pub csrf: Option<String>,
     #[serde(default)]
-    source: String,
+    pub source: String,
     /// A message to try the rule on (prefilled from the inbox).
     #[serde(default)]
-    test_text: String,
+    pub test_text: String,
     #[serde(default)]
-    test_channel: String,
+    pub test_channel: String,
     #[serde(default)]
-    test_sender: String,
+    pub test_sender: String,
     #[serde(default)]
-    message_id: Option<i64>,
+    pub message_id: Option<i64>,
     /// Keep the test message as a sample of the rule.
     #[serde(default)]
-    add_sample: Option<String>,
+    pub add_sample: Option<String>,
+    /// Store the sample as it is, not redacted.
+    #[serde(default)]
+    pub keep_original: Option<String>,
     /// Save even though samples change.
     #[serde(default)]
-    confirm: Option<String>,
+    pub confirm: Option<String>,
+    /// What the model said about its draft (not part of the form).
+    #[serde(skip)]
+    pub explanation: String,
+    /// Which model drafted it (not part of the form).
+    #[serde(skip)]
+    pub drafted_by: Option<String>,
+    /// What was still wrong with the draft after the retries.
+    #[serde(skip)]
+    pub problems: Vec<String>,
 }
 
 impl EditorForm {
@@ -363,7 +377,7 @@ impl EditorPage {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn editor_page(
+pub(super) async fn editor_page(
     state: &AppState,
     session: &Session,
     jar: &CookieJar,
@@ -483,6 +497,10 @@ pub async fn edit(
         ("enabled", _) => "Enabled.".to_string(),
         ("disabled", _) => "Disabled: it no longer reads new messages.".to_string(),
         ("sample-deleted", _) => "Sample deleted.".to_string(),
+        ("imported", _) => {
+            "Imported, and disabled: check it, then enable it. Its samples are kept with it."
+                .to_string()
+        }
         _ => String::new(),
     };
     editor_page(
@@ -593,17 +611,42 @@ async fn save(
             let Some(compiled) = eval.compiled else {
                 return Ok(Saved::Invalid(eval.preview.errors.join("\n")));
             };
-            let mut sample = None;
+            // The sample is stored redacted unless the admin chose to keep the
+            // original, and what the rule reads from it is what that text gives.
+            let mut sample: Option<(String, Option<String>, Fields)> = None;
             if submitted.add_sample.is_some() && !submitted.test_text.trim().is_empty() {
                 match eval.preview.test.as_ref() {
-                    Some(t) if t.matches && t.error.is_empty() => {
-                        let fields: Fields =
-                            t.fields.iter().map(|f| (f.name.clone(), f.value.clone())).collect();
-                        sample = Some(fields);
-                    }
+                    Some(t) if t.matches && t.error.is_empty() => {}
                     _ => {
                         return Ok(Saved::Invalid(
                             "The test message must match the rule, with every field read, to be kept as a sample."
+                                .into(),
+                        ));
+                    }
+                }
+                let household = settings::household(c)?;
+                let original = submitted.test_text.trim().to_string();
+                let (text, sender) = if submitted.keep_original.is_some() {
+                    (original, submitted.sender().map(str::to_string))
+                } else {
+                    (
+                        redact(&original, &household, Options::default()).text,
+                        submitted.sender().map(|s| redact_known(s, &household)),
+                    )
+                };
+                match engine::evaluate(
+                    std::slice::from_ref(&compiled),
+                    &Input {
+                        channel: submitted.channel(),
+                        sender: sender.as_deref(),
+                        text: &text,
+                        sent_at: now,
+                    },
+                ) {
+                    Outcome::Matched { fields, .. } => sample = Some((text, sender, fields)),
+                    _ => {
+                        return Ok(Saved::Invalid(
+                            "After redaction the rule no longer reads this message (a pattern relies on text that was replaced). Edit the rule, or tick \"keep the original\" to store the sample as it is."
                                 .into(),
                         ));
                     }
@@ -629,14 +672,14 @@ async fn save(
                     rule_db::set_expected(&tx, s.id, &check.got)?;
                 }
             }
-            if let Some(expected) = sample {
+            if let Some((text, sender, expected)) = sample {
                 rule_db::add_sample(
                     &tx,
                     &rule_id,
                     submitted.message_id,
                     submitted.channel(),
-                    submitted.sender(),
-                    submitted.test_text.trim(),
+                    sender.as_deref(),
+                    &text,
                     &expected,
                     now,
                 )?;

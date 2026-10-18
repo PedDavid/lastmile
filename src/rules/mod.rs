@@ -2,8 +2,10 @@
 //! ship with the app; they are written in it. See `schema` for what a rule
 //! says and `engine` for how it runs.
 
+pub mod draft;
 pub mod engine;
 pub mod schema;
+pub mod share;
 
 use crate::db::rules::{Sample, StoredRule};
 use engine::{CompiledRule, Fields, Input, Outcome};
