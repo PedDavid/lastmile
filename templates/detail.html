@@ -121,6 +121,23 @@
       </section>
     </div>
   </div>
+
+  {% if !messages.is_empty() %}
+  <div class="card">
+    <header>
+      <h2>Messages</h2>
+      <p>What came in about this package. The text is deleted after the retention period.</p>
+    </header>
+    <section class="flex flex-col gap-3">
+      {% for m in messages %}
+      <div class="flex flex-col gap-1">
+        <span class="text-xs text-muted-foreground">{{ m.channel }} · {{ m.received }}</span>
+        {% if m.text.is_empty() %}<p class="text-sm text-muted-foreground">Text deleted.</p>{% else %}<div class="message-text">{{ m.text }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </section>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 

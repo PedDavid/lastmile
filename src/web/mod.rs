@@ -1,10 +1,17 @@
 //! HTTP layer: the UI router, security middleware, static assets and the
 //! separate metrics/health router.
 
+mod api;
 pub mod auth;
 mod forms;
+mod inbox;
 mod pages;
+mod rules;
+mod settings;
 mod views;
+
+pub use forms::parse_date;
+pub use views::safe_link;
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -35,7 +42,9 @@ pub struct AppState {
 pub struct Inner {
     pub cfg: Config,
     pub db: Db,
+    pub metrics: Arc<Metrics>,
     pub auth: AuthMode,
+    pub rate_limiter: api::RateLimiter,
     pub cookie_key: Key,
     pub asset_version: String,
     /// Pins the clock the pages render relative dates against (tests only).
@@ -47,8 +56,10 @@ impl AppState {
         AppState {
             inner: Arc::new(Inner {
                 cfg,
+                metrics: Metrics::new(db.clone()),
                 db,
                 auth,
+                rate_limiter: api::RateLimiter::default(),
                 cookie_key,
                 asset_version: asset_version(),
                 fixed_now: None,
@@ -143,6 +154,8 @@ impl From<askama::Error> for AppError {
 #[include = "dist/*"]
 #[include = "js/*"]
 #[include = "vendor/htmx/*.js"]
+#[include = "icons/*"]
+#[include = "manifest.webmanifest"]
 struct Assets;
 
 fn asset_version() -> String {
@@ -156,16 +169,38 @@ fn asset_version() -> String {
 }
 
 async fn asset(Path(path): Path<String>) -> Response {
-    match Assets::get(&path) {
+    serve_asset(&path, "public, max-age=31536000, immutable")
+}
+
+/// The service worker and the manifest live at fixed URLs (the worker's
+/// scope is its directory), so they are revalidated instead of cached for
+/// good.
+async fn service_worker() -> Response {
+    let mut res = serve_asset("js/sw.js", "no-cache");
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/javascript"),
+    );
+    res
+}
+
+async fn manifest() -> Response {
+    let mut res = serve_asset("manifest.webmanifest", "no-cache");
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/manifest+json"),
+    );
+    res
+}
+
+fn serve_asset(path: &str, cache: &'static str) -> Response {
+    match Assets::get(path) {
         Some(content) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
             (
                 [
                     (header::CONTENT_TYPE, mime.as_ref().to_string()),
-                    (
-                        header::CACHE_CONTROL,
-                        "public, max-age=31536000, immutable".to_string(),
-                    ),
+                    (header::CACHE_CONTROL, cache.to_string()),
                 ],
                 Body::from(content.data.into_owned()),
             )
@@ -180,7 +215,9 @@ connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; fo
 
 /// Security headers on every response; `no-store` on everything but assets.
 async fn security_headers(req: Request, next: Next) -> Response {
-    let is_asset = req.uri().path().starts_with("/assets/");
+    let path = req.uri().path();
+    let is_asset =
+        path.starts_with("/assets/") || path == "/sw.js" || path == "/manifest.webmanifest";
     let mut res = next.run(req).await;
     let h = res.headers_mut();
     h.insert(
@@ -203,8 +240,10 @@ async fn security_headers(req: Request, next: Next) -> Response {
 }
 
 /// Rejects state-changing requests whose `Origin` is not the public URL.
+/// The ingest API is exempt: it takes bearer tokens only, never cookies.
 async fn origin_check(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
+        || req.uri().path() == "/api/ingest";
     if !safe {
         let origin = req
             .headers()
@@ -232,6 +271,36 @@ pub fn router(state: AppState) -> Router {
         .route("/packages/{id}/status", post(forms::set_status))
         .route("/packages/{id}/archive", post(forms::archive))
         .route("/packages/{id}/unarchive", post(forms::unarchive))
+        .route("/inbox", get(inbox::inbox))
+        .route("/inbox/paste", post(inbox::paste))
+        .route(
+            "/inbox/upload",
+            post(inbox::upload).layer(DefaultBodyLimit::max(
+                inbox::MAX_FILES * inbox::MAX_FILE_BYTES + 64 * 1024,
+            )),
+        )
+        .route("/inbox/{id}/attach", post(inbox::attach))
+        .route("/inbox/{id}/ignore", post(inbox::ignore))
+        .route("/share", get(inbox::share))
+        .route("/rules", get(rules::list).post(rules::create))
+        .route("/rules/new", get(rules::new))
+        .route("/rules/preview", post(rules::preview_new))
+        .route("/rules/{id}", get(rules::edit).post(rules::update))
+        .route("/rules/{id}/preview", post(rules::preview_existing))
+        .route("/rules/{id}/toggle", post(rules::toggle))
+        .route(
+            "/rules/{id}/samples/{sample}/delete",
+            post(rules::delete_sample),
+        )
+        .route("/settings", get(settings::settings))
+        .route("/settings/tokens", post(settings::create_token))
+        .route("/settings/tokens/{id}/revoke", post(settings::revoke_token))
+        .route(
+            "/api/ingest",
+            post(api::ingest_api).layer(DefaultBodyLimit::max(api::MAX_BODY)),
+        )
+        .route("/sw.js", get(service_worker))
+        .route("/manifest.webmanifest", get(manifest))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
@@ -239,9 +308,10 @@ pub fn router(state: AppState) -> Router {
         .fallback(|| async { AppError::NotFound("page not found".into()) })
         .layer(middleware::from_fn_with_state(state.clone(), origin_check))
         .layer(middleware::from_fn(security_headers))
-        .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(DefaultBodyLimit::max(256 * 1024))
         // Spans record method and path only: no query strings (the OIDC
-        // callback carries the authorization code), headers or bodies.
+        // callback carries the authorization code, and /share the shared
+        // text), headers or bodies.
         .layer(TraceLayer::new_for_http().make_span_with(|req: &Request| {
             tracing::info_span!("http", method = %req.method(), path = %req.uri().path())
         }))

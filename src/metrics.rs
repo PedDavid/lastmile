@@ -1,27 +1,63 @@
-//! Prometheus metrics, computed from the database on every scrape (a
-//! household's packages are a handful of rows).
+//! Prometheus metrics. Gauges are computed from the database on every
+//! scrape (a household's packages are a handful of rows); counters track
+//! incoming messages.
 
 use std::collections::BTreeMap;
 
 use jiff::Timestamp;
-use prometheus_client::encoding::{DescriptorEncoder, EncodeMetric};
+use prometheus_client::encoding::{DescriptorEncoder, EncodeLabelSet, EncodeMetric};
 use prometheus_client::metrics::MetricType;
+use prometheus_client::metrics::counter::Counter;
+use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::ConstGauge;
 use prometheus_client::registry::Registry;
 
-use crate::db::Db;
+use crate::db::messages::{self, MessageResult};
 use crate::db::packages::{self, Scope};
-use crate::model::{Package, Status};
+use crate::db::{Db, rules};
+use crate::model::{Channel, Package, Status};
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct MessageLabels {
+    pub channel: String,
+    pub result: String,
+}
 
 pub struct Metrics {
     registry: Registry,
+    messages: Family<MessageLabels, Counter>,
 }
 
 impl Metrics {
     pub fn new(db: Db) -> std::sync::Arc<Self> {
         let mut registry = Registry::default();
+        let messages = Family::<MessageLabels, Counter>::default();
+        // Every series starts at 0: `increase()` ignores a counter's first
+        // sample, so one that first appears at 1 would hide a message.
+        for channel in Channel::ALL {
+            for result in MessageResult::ALL {
+                let _ = messages.get_or_create(&MessageLabels {
+                    channel: channel.as_str().into(),
+                    result: result.as_str().into(),
+                });
+            }
+        }
+        registry.register(
+            "lastmile_messages",
+            "Messages received, by channel and what the rules made of them",
+            messages.clone(),
+        );
         registry.register_collector(Box::new(PackageCollector { db }));
-        std::sync::Arc::new(Metrics { registry })
+        std::sync::Arc::new(Metrics { registry, messages })
+    }
+
+    pub fn message(&self, channel: Channel, result: MessageResult) {
+        self.messages
+            .get_or_create(&MessageLabels {
+                channel: channel.as_str().into(),
+                result: result.as_str().into(),
+            })
+            .inc();
     }
 
     /// Runs the database queries: call it from a blocking context.
@@ -101,6 +137,39 @@ impl prometheus_client::collector::Collector for PackageCollector {
                 ConstGauge::new(seconds(p.status_at)).encode(metric.encode_family(&labels)?)?;
             }
         }
+        let inbox = self
+            .db
+            .blocking(|c| messages::inbox_counts(c))
+            .unwrap_or_default();
+        {
+            let mut metric = encoder.encode_descriptor(
+                "lastmile_inbox_messages",
+                "Messages waiting in the inbox, by result",
+                None,
+                MetricType::Gauge,
+            )?;
+            for result in ["unmatched", "error", "matched"] {
+                let n = inbox
+                    .iter()
+                    .find(|(r, _)| r == result)
+                    .map_or(0, |(_, n)| *n);
+                let labels = [("result", result.to_string())];
+                ConstGauge::new(n).encode(metric.encode_family(&labels)?)?;
+            }
+        }
+        let rule_counts = self.db.blocking(|c| rules::counts(c)).unwrap_or_default();
+        {
+            let mut metric = encoder.encode_descriptor(
+                "lastmile_rules",
+                "Rules by origin and whether they are enabled",
+                None,
+                MetricType::Gauge,
+            )?;
+            for (origin, enabled, n) in &rule_counts {
+                let labels = [("origin", origin.clone()), ("enabled", enabled.to_string())];
+                ConstGauge::new(*n).encode(metric.encode_family(&labels)?)?;
+            }
+        }
         {
             let mut metric = encoder.encode_descriptor(
                 "lastmile_package_code_expiry_timestamp_seconds",
@@ -161,7 +230,21 @@ mod tests {
 
     #[test]
     fn empty_statuses_are_exported_at_zero() {
-        let text = Metrics::new(Db::open_in_memory().unwrap()).encode();
+        let metrics = Metrics::new(Db::open_in_memory().unwrap());
+        metrics.message(Channel::Share, MessageResult::Matched);
+        let text = metrics.encode();
+        assert!(
+            text.contains(r#"lastmile_messages_total{channel="share",result="matched"} 1"#),
+            "{text}"
+        );
+        assert!(
+            text.contains(r#"lastmile_messages_total{channel="upload",result="error"} 0"#),
+            "{text}"
+        );
+        assert!(
+            text.contains(r#"lastmile_inbox_messages{result="unmatched"} 0"#),
+            "{text}"
+        );
         for s in Status::ALL {
             assert!(
                 text.contains(&format!(

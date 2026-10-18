@@ -77,8 +77,13 @@ pub async fn body(res: axum::response::Response) -> String {
 /// The `--demo` app (sample packages, dev auth) frozen at [`NOW`], with a
 /// fixed CSRF token so its pages render byte for byte the same every run.
 pub fn demo_app() -> Router {
+    demo_app_at("http://localhost:8080")
+}
+
+/// [`demo_app`] served at `public_url` (the Origin its forms post from).
+pub fn demo_app_at(public_url: &str) -> Router {
     let now: jiff::Timestamp = NOW.parse().unwrap();
-    let cfg = Config::try_parse_from(["lastmile", "--demo"]).unwrap();
+    let cfg = Config::try_parse_from(["lastmile", "--demo", "--public-url", public_url]).unwrap();
     let db = Db::open_in_memory().unwrap();
     db.blocking(|c| lastmile::demo::load(c, now)).unwrap();
     let auth = AuthMode::InsecureDev {

@@ -1,0 +1,10 @@
+{
+  "channel": "upload",
+  "rule": "ctt-in-transit",
+  "fields": {
+    "courier": "CTT",
+    "eta": "2026-10-21",
+    "status": "in_transit",
+    "tracking_number": "RR987654321PT"
+  }
+}

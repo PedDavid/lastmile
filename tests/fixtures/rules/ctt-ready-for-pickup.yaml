@@ -1,0 +1,16 @@
+slug: ctt-ready-for-pickup
+name: CTT – ready for pickup (SMS)
+courier: CTT
+match:
+  channels: [share, api, paste]
+  all: ['(?i)disponível para levantamento']
+  none: ['(?i)devolvid']
+extract:
+  tracking_number: '\b(?P<v>[A-Z]{2}\d{9}PT)\b'
+  code: '(?i)código[^0-9]{0,20}(?P<v>\d{6})'
+  pickup_point: '(?i)levantamento (?:no|na|em) (?P<v>[^.\n]+?)(?:\s+até|\.|\n|$)'
+  code_expires_at: '(?i)até (?:dia )?(?P<v>\d{1,2}/\d{1,2}(?:/\d{2,4})?)'
+set:
+  status: ready_for_pickup
+  codeKind: pickup
+priority: 100

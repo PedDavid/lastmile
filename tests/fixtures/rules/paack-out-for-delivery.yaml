@@ -1,0 +1,13 @@
+slug: paack-out-for-delivery
+name: Paack – out for delivery (SMS)
+courier: Paack
+match:
+  all: ['(?i)paack', '(?i)(hoje|today)']
+extract:
+  tracking_number: '(?i)encomenda (?P<v>PCK[A-Z0-9]+)'
+  code: '(?i)código (?:de entrega )?(?P<v>\d{4})'
+  tracking_url: '(?P<v>https://[^\s]*paack[^\s]*)'
+set:
+  status: out_for_delivery
+  codeKind: delivery
+priority: 100

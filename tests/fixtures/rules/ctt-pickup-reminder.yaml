@@ -1,0 +1,10 @@
+slug: ctt-pickup-reminder
+name: CTT – pickup reminder (SMS)
+description: The reminder doesn't name the object, so it is attached by hand.
+courier: CTT
+followUp: true
+match:
+  all: ['(?i)ainda não (?:foi )?levantad']
+extract:
+  code_expires_at: '(?i)até (?:dia )?(?P<v>\d{1,2}/\d{1,2})'
+priority: 90

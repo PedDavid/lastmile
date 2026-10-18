@@ -1,8 +1,11 @@
 //! SQLite storage: one connection behind a mutex (one replica, a handful
 //! of users), used from async code through [`Db::call`].
 
+pub mod messages;
 pub mod migrations;
 pub mod packages;
+pub mod rules;
+pub mod tokens;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

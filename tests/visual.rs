@@ -144,3 +144,76 @@ async fn add_package_phone() {
     let ui = open_phone("/packages/new", &[]).await;
     assert_screenshot(&ui.page, "add-package-phone").await;
 }
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn inbox() {
+    let ui = open("/inbox", &[]).await;
+    assert_screenshot(&ui.page, "inbox").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn inbox_phone_dark() {
+    let ui = open_phone("/inbox", &[("lastmile_theme", "dark")]).await;
+    assert_screenshot(&ui.page, "inbox-phone-dark").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn rules_list() {
+    let ui = open("/rules", &[]).await;
+    assert_screenshot(&ui.page, "rules").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn rule_editor_from_an_inbox_message() {
+    // Message 3: a pickup notice the CTT rule matches but can't read a
+    // tracking number from.
+    let ui = open("/rules/new?message=3", &[]).await;
+    expect(ui.page.locator("#preview .card").first())
+        .to_be_visible()
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "rule-editor").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn share_target_phone() {
+    let ui = open_phone(
+        "/share?title=CTT&text=CTT%3A%20A%20sua%20encomenda%20RR123456789PT%20est%C3%A1%20dispon%C3%ADvel%20para%20levantamento%20no%20Cacifo%20CTT%20Mercado%20de%20Benfica.%20C%C3%B3digo%3A%20482913.",
+        &[],
+    )
+    .await;
+    assert_screenshot(&ui.page, "share-phone").await;
+}
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn settings_devices() {
+    let ui = open("/settings", &[]).await;
+    ui.page
+        .locator("input[name=name]")
+        .fill("Ana's iPhone", None)
+        .await
+        .unwrap();
+    ui.page
+        .locator("form[action='/settings/tokens'] button[type=submit]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("[data-copy^=lm_]"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    // The token is random: cover it so the screenshot is stable.
+    ui.page
+        .evaluate_expression(
+            "document.querySelectorAll('code').forEach(c => { if (c.textContent.startsWith('lm_')) c.textContent = 'lm_' + 'x'.repeat(43); })",
+        )
+        .await
+        .unwrap();
+    assert_screenshot(&ui.page, "settings-devices").await;
+}

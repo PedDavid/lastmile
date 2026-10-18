@@ -79,6 +79,18 @@ pub fn insert(
     now: Timestamp,
 ) -> rusqlite::Result<i64> {
     let tx = conn.transaction()?;
+    let id = insert_in(&tx, p, description, now)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+/// [`insert`] inside the caller's transaction.
+pub fn insert_in(
+    tx: &Connection,
+    p: &NewPackage,
+    description: &str,
+    now: Timestamp,
+) -> rusqlite::Result<i64> {
     tx.execute(
         "INSERT INTO packages (title, merchant, recipient, courier, tracking_number, order_ref, \
          tracking_url, status, status_source, status_at, eta_from, eta_to, code, code_kind, \
@@ -109,14 +121,13 @@ pub fn insert(
     )?;
     let id = tx.last_insert_rowid();
     insert_event(
-        &tx,
+        tx,
         id,
         p.status_at,
         Some(p.status),
         description,
         p.status_source,
     )?;
-    tx.commit()?;
     Ok(id)
 }
 
@@ -151,7 +162,17 @@ pub fn update(
     now: Timestamp,
 ) -> rusqlite::Result<bool> {
     let tx = conn.transaction()?;
-    let n = tx.execute(
+    let found = replace_details(&tx, id, p)?;
+    if found {
+        insert_event(&tx, id, now, None, description, Source::Manual)?;
+    }
+    tx.commit()?;
+    Ok(found)
+}
+
+/// [`update`] without the event, for callers that record their own.
+pub fn replace_details(conn: &Connection, id: i64, p: &NewPackage) -> rusqlite::Result<bool> {
+    let n = conn.execute(
         "UPDATE packages SET title = ?2, merchant = ?3, recipient = ?4, courier = ?5, \
          tracking_number = ?6, order_ref = ?7, tracking_url = ?8, eta_from = ?9, eta_to = ?10, \
          code = ?11, code_kind = ?12, code_expires_at = ?13, pickup_name = ?14, \
@@ -176,11 +197,48 @@ pub fn update(
             p.notes,
         ],
     )?;
-    if n == 1 {
-        insert_event(&tx, id, now, None, description, Source::Manual)?;
-    }
-    tx.commit()?;
     Ok(n == 1)
+}
+
+/// The package a message names: by tracking number (the courier must not
+/// disagree), else by order reference (nor the merchant). Active packages
+/// first, then the newest.
+pub fn find(
+    conn: &Connection,
+    courier: Option<&str>,
+    tracking_number: Option<&str>,
+    merchant: Option<&str>,
+    order_ref: Option<&str>,
+) -> rusqlite::Result<Option<Package>> {
+    if let Some(tracking) = tracking_number {
+        let found = conn
+            .query_row(
+                &format!(
+                    "SELECT {COLUMNS} FROM packages WHERE tracking_number = ?1 COLLATE NOCASE \
+                     AND (?2 IS NULL OR courier IS NULL OR courier = ?2 COLLATE NOCASE) \
+                     ORDER BY archived_at IS NOT NULL, id DESC LIMIT 1"
+                ),
+                params![tracking, courier],
+                package,
+            )
+            .optional()?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    let Some(order) = order_ref else {
+        return Ok(None);
+    };
+    conn.query_row(
+        &format!(
+            "SELECT {COLUMNS} FROM packages WHERE order_ref = ?1 COLLATE NOCASE \
+             AND (?2 IS NULL OR merchant IS NULL OR merchant = ?2 COLLATE NOCASE) \
+             ORDER BY archived_at IS NOT NULL, id DESC LIMIT 1"
+        ),
+        params![order, merchant],
+        package,
+    )
+    .optional()
 }
 
 /// Sets a package's status and adds it to the timeline.
@@ -193,14 +251,27 @@ pub fn set_status(
     description: &str,
 ) -> rusqlite::Result<bool> {
     let tx = conn.transaction()?;
-    let n = tx.execute(
+    let found = set_status_in(&tx, id, status, source, at, description)?;
+    tx.commit()?;
+    Ok(found)
+}
+
+/// [`set_status`] inside the caller's transaction.
+pub fn set_status_in(
+    conn: &Connection,
+    id: i64,
+    status: Status,
+    source: Source,
+    at: Timestamp,
+    description: &str,
+) -> rusqlite::Result<bool> {
+    let n = conn.execute(
         "UPDATE packages SET status = ?2, status_source = ?3, status_at = ?4 WHERE id = ?1",
         params![id, status.as_str(), source.as_str(), secs(at)],
     )?;
     if n == 1 {
-        insert_event(&tx, id, at, Some(status), description, source)?;
+        insert_event(conn, id, at, Some(status), description, source)?;
     }
-    tx.commit()?;
     Ok(n == 1)
 }
 

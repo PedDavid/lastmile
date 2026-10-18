@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Rules</h1>
+      <p class="text-muted-foreground text-sm">Each rule reads one kind of message: when it matches, it finds or creates the package and updates it.</p>
+    </div>
+    <a class="btn" href="/rules/new">{% include "icons/plus.svg" %} New rule</a>
+  </div>
+
+  {% if rows.is_empty() %}
+  <div class="empty rounded-lg border border-dashed">
+    <header>
+      <figure>{% include "icons/workflow.svg" %}</figure>
+      <h3>No rules yet</h3>
+      <p>None come with the app. Start from a message in the <a class="underline underline-offset-4" href="/inbox">inbox</a>{% if inbox > 0 %} ({{ inbox }} waiting){% endif %}: <em>Build rule</em> opens the editor with it, or write one from scratch.</p>
+    </header>
+  </div>
+  {% else %}
+  <div class="table-container rounded-lg border">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th class="hidden sm:table-cell">Priority</th>
+          <th>Matched</th>
+          <th class="hidden md:table-cell">Samples</th>
+          <th class="text-end">State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>
+            <a href="/rules/{{ r.id }}" class="font-medium hover:underline">{{ r.name }}</a>
+            <div class="text-xs text-muted-foreground">{% if !r.courier.is_empty() %}{{ r.courier }} · {% endif %}version {{ r.version }}{% if r.imported %} · imported{% endif %}</div>
+          </td>
+          <td class="hidden sm:table-cell tabular-nums">{{ r.priority }}</td>
+          <td><span class="tabular-nums">{{ r.hits }}</span> <span class="text-xs text-muted-foreground">· last {{ r.last_match }}</span></td>
+          <td class="hidden md:table-cell tabular-nums">{{ r.samples }}</td>
+          <td class="text-end">
+            <form method="post" action="/rules/{{ r.id }}/toggle">
+              <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+              <button type="submit" class="btn" data-variant="{% if r.enabled %}secondary{% else %}outline{% endif %}" data-size="sm" title="{% if r.enabled %}Disable{% else %}Enable{% endif %}">{% if r.enabled %}Enabled{% else %}Disabled{% endif %}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

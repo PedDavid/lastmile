@@ -3,7 +3,7 @@
 
 use askama::Template;
 use axum::Form;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
@@ -17,7 +17,9 @@ use super::pages::Layout;
 use super::views::fmt_date;
 use super::{AppError, AppState};
 use crate::couriers;
+use crate::db::messages;
 use crate::db::packages::{self, Suggest};
+use crate::ingest;
 use crate::model::{CodeKind, NewPackage, Package, PickupPoint, Source, Status};
 
 /// The package form's fields, as typed.
@@ -59,6 +61,9 @@ pub struct PackageForm {
     pub pickup_hours: String,
     #[serde(default)]
     pub notes: String,
+    /// The inbox message this package is created from.
+    #[serde(default)]
+    pub message_id: Option<i64>,
 }
 
 fn opt(s: &str) -> Option<String> {
@@ -85,6 +90,10 @@ const MAX_NOTES: usize = 4000;
 
 impl PackageForm {
     fn from_package(p: &Package) -> PackageForm {
+        PackageForm::from_new(&p.to_new())
+    }
+
+    fn from_new(p: &NewPackage) -> PackageForm {
         let s = |v: &Option<String>| v.clone().unwrap_or_default();
         let d = |v: Option<Timestamp>| v.map(fmt_date).unwrap_or_default();
         PackageForm {
@@ -109,6 +118,7 @@ impl PackageForm {
             pickup_address: s(&p.pickup_point.address),
             pickup_hours: s(&p.pickup_point.hours),
             notes: s(&p.notes),
+            message_id: None,
         }
     }
 
@@ -268,20 +278,40 @@ async fn get_package(state: &AppState, id: i64) -> Result<Package, AppError> {
         .ok_or_else(|| AppError::NotFound(format!("no package {id}")))
 }
 
+#[derive(Deserialize, Default)]
+pub struct NewQuery {
+    /// Prefill from what a rule read in this inbox message.
+    message: Option<i64>,
+}
+
 pub async fn new(
     State(state): State<AppState>,
     user: User,
     jar: CookieJar,
+    Query(q): Query<NewQuery>,
 ) -> Result<Response, AppError> {
-    form_page(
-        &state,
-        &user,
-        &jar,
-        None,
-        PackageForm::default(),
-        String::new(),
-    )
-    .await
+    let mut form = PackageForm::default();
+    if let Some(id) = q.message {
+        let m = state
+            .inner
+            .db
+            .call(move |c| messages::get(c, id))
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("no message {id}")))?;
+        let mut p = NewPackage::titled(String::new(), m.sent_at);
+        ingest::merge_fields(&mut p, &m.extracted);
+        if p.title.is_empty() && !m.extracted.is_empty() {
+            p.title = ingest::default_title(&p);
+        }
+        p.status = m
+            .extracted
+            .get("status")
+            .and_then(|s| Status::parse(s))
+            .unwrap_or(Status::Announced);
+        form = PackageForm::from_new(&p);
+        form.message_id = Some(id);
+    }
+    form_page(&state, &user, &jar, None, form, String::new()).await
 }
 
 pub async fn create(
@@ -298,10 +328,17 @@ pub async fn create(
         Err(e) => return form_page(&state, &user, &jar, None, form, e).await,
     };
     let description = format!("Added by {}", user.0.name);
+    let message = form.message_id;
     let id = state
         .inner
         .db
-        .call(move |c| packages::insert(c, &package, &description, now))
+        .call(move |c| {
+            let id = packages::insert(c, &package, &description, now)?;
+            if let Some(m) = message {
+                messages::attach(c, m, id)?;
+            }
+            Ok(id)
+        })
         .await?;
     Ok(Redirect::to(&format!("/packages/{id}?notice=added")).into_response())
 }

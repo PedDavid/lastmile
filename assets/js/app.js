@@ -131,6 +131,39 @@
     }
   });
 
+  // The .eml dropbox: dropping files on it fills its file input and sends
+  // the form; picking files with the button does the same.
+  document.addEventListener('dragover', (event) => {
+    const zone = event.target.closest('[data-dropzone]');
+    if (!zone) return;
+    event.preventDefault();
+    zone.dataset.dragging = 'true';
+  });
+  document.addEventListener('dragleave', (event) => {
+    const zone = event.target.closest('[data-dropzone]');
+    if (zone && !zone.contains(event.relatedTarget)) delete zone.dataset.dragging;
+  });
+  document.addEventListener('drop', (event) => {
+    const zone = event.target.closest('[data-dropzone]');
+    if (!zone) return;
+    event.preventDefault();
+    delete zone.dataset.dragging;
+    const input = zone.querySelector('input[type="file"]');
+    if (!input || !event.dataTransfer?.files.length) return;
+    input.files = event.dataTransfer.files;
+    zone.closest('form')?.requestSubmit();
+  });
+  document.addEventListener('change', (event) => {
+    if (event.target.matches('[data-dropzone] input[type="file"]') && event.target.files.length) {
+      event.target.closest('form')?.requestSubmit();
+    }
+  });
+
+  // Installable (and a share target on Android) needs a service worker.
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
   // Follow the OS preference until the user picks a theme.
   if (!document.cookie.includes('lastmile_theme=') && window.matchMedia('(prefers-color-scheme: dark)').matches) {
     root.classList.add('dark');

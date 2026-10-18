@@ -41,6 +41,10 @@ spec:
               value: /data/lastmile.db
             - name: LASTMILE_STALE_AFTER
               value: {{ .Values.staleAfter | quote }}
+            - name: LASTMILE_ARCHIVE_AFTER
+              value: {{ .Values.archiveAfter | quote }}
+            - name: LASTMILE_MESSAGE_RETENTION
+              value: {{ .Values.messageRetention | quote }}
             - name: LASTMILE_COOKIE_KEY_FILE
               value: /etc/lastmile/cookie/cookie-key
             {{- if .Values.insecureDevAuth }}

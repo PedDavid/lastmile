@@ -11,22 +11,42 @@ where it is going.
 |---|---|
 | ![Phone](tests/screenshots/packages-phone.png) | ![Detail](tests/screenshots/detail-pickup.png) |
 
+| The inbox | A rule, built from a message |
+|---|---|
+| ![Inbox](tests/screenshots/inbox.png) | ![Rule editor](tests/screenshots/rule-editor.png) |
+
 ## Status
 
-**M1 – Useful by hand.** Packages are added and edited in the UI, with the
-code to give the courier or type at the locker in large print and a copy
-button. The list filters by *Preparing · In transit · Arrived*, *Needs
-attention* (a problem reported, no news for `--stale-after`, or a pickup about
-to end) and *Archived*, by text and by who it is for. Each package has a
-timeline; its status can be set by hand (which always applies, even
-backwards), and it can be archived. Every household member who logs in can do
-all of this. Built on the stack shared with
-[dominium](https://github.com/PedDavid/dominium) and
-[clavium](https://github.com/PedDavid/clavium) (Rust, axum, askama, Tailwind
-v4, Basecoat, htmx, OIDC) and SQLite.
+**M2 – Messages and rules.** Couriers' and shops' messages come in, and
+rules turn them into packages:
 
-Not yet: packages from messages (shared texts and `.eml` files) and the
-rules that read them (M2).
+- **Channels.** A paste box and an `.eml` dropbox on the inbox page; the
+  Android share sheet (lastmile installs as a PWA share target); an iOS
+  Shortcut posting to `/api/ingest` with a per-person token
+  ([docs/ios-shortcut.md](docs/ios-shortcut.md)).
+- **Rules** are data, not code: match conditions (channel, sender, regexes),
+  regexes that extract fields (tracking number, code, pickup point, dates…)
+  and the status to set. None ship with the app: admins write them in an
+  editor with a live preview, starting from an inbox message. Each rule keeps
+  regression samples; saving re-runs every rule's samples and refuses a change
+  that breaks one unless confirmed, then re-runs the inbox.
+- **Packages** are found by tracking number (or order reference) and
+  updated, or created. Status only moves forward from messages (manual changes
+  always apply), and older news only goes on the timeline.
+- **The inbox** keeps what no rule read, what a rule failed on, and
+  follow-ups that don't say which package: attach them, create a package,
+  build a rule or ignore them.
+- **Retention.** Delivered packages are archived after `--archive-after`
+  (7d), and message text is deleted after `--message-retention` (30d).
+
+Before that, **M1** made the app useful by hand (add and edit packages, the
+code in large print, filters, a timeline, status overrides, metrics), on
+**M0**'s stack shared with [dominium](https://github.com/PedDavid/dominium)
+and [clavium](https://github.com/PedDavid/clavium) (Rust, axum, askama,
+Tailwind v4, Basecoat, htmx, OIDC) and SQLite.
+
+Next (M3): redaction, drafting rules with an LLM, and sharing rules as text
+or files.
 
 ## Running it
 
@@ -52,7 +72,8 @@ lastmile \
 Every flag can also be set with a `LASTMILE_*` environment variable
 (`lastmile --help` lists them). The UI listens on `:8080`; `/metrics`,
 `/healthz` and `/readyz` on `:9090`, without authentication, so that port
-should stay inside the cluster.
+should stay inside the cluster. `/api/ingest` is the only UI-port endpoint that
+works without a login (it takes a token), and the phones need to reach it.
 
 ## Metrics
 
@@ -63,6 +84,9 @@ Computed from the database on every scrape.
 | `lastmile_packages{status, courier}` | Active (non-archived) packages; every status is exported, at 0 when empty |
 | `lastmile_package_ready_since_timestamp_seconds{id, courier}` | When each package waiting at a pickup point got there |
 | `lastmile_package_code_expiry_timestamp_seconds{id}` | When its pickup period ends, if known |
+| `lastmile_inbox_messages{result}` | Messages waiting in the inbox: `unmatched`, `error`, or `matched` follow-ups to attach |
+| `lastmile_messages_total{channel, result}` | Messages received |
+| `lastmile_rules{origin, enabled}` | |
 
 ## Kubernetes
 
@@ -86,6 +110,11 @@ make helm-lint    # needs helm and yq
 make visual-docker         # screenshot tests, in CI's container
 make visual-docker-update  # rewrite the baselines in tests/screenshots/
 ```
+
+The rule engine is tested with **synthetic** messages in the style of CTT
+and Paack (`tests/fixtures/messages/`, each with an `*.expected.json`) and the
+example rules in `tests/fixtures/rules/`; `--demo` loads the same rules and
+messages. No real personal data is committed.
 
 **Screenshots** (`tests/visual.rs`,
 [playwright-rs](https://github.com/padamson/playwright-rust)) drive Chromium

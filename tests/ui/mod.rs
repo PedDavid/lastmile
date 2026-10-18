@@ -36,11 +36,11 @@ pub const PHONE: Viewport = Viewport {
 };
 
 pub async fn open(path: &str, cookies: &[(&str, &str)]) -> Ui {
-    open_app(path, cookies, DESKTOP, crate::common::demo_app()).await
+    open_app(path, cookies, DESKTOP, crate::common::demo_app_at(ORIGIN)).await
 }
 
 pub async fn open_phone(path: &str, cookies: &[(&str, &str)]) -> Ui {
-    open_app(path, cookies, PHONE, crate::common::demo_app()).await
+    open_app(path, cookies, PHONE, crate::common::demo_app_at(ORIGIN)).await
 }
 
 /// Like [`open`], at `viewport`, serving `app` (the demo app with test-only

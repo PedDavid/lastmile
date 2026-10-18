@@ -1,0 +1,13 @@
+{
+  "channel": "share",
+  "rule": "ctt-ready-for-pickup",
+  "fields": {
+    "code": "482913",
+    "code_expires_at": "2026-10-24",
+    "code_kind": "pickup",
+    "courier": "CTT",
+    "pickup_point": "Cacifo CTT Mercado de Benfica",
+    "status": "ready_for_pickup",
+    "tracking_number": "RR123456789PT"
+  }
+}
