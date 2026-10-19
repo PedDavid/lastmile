@@ -18,7 +18,7 @@ use super::{AppError, AppState};
 use crate::db::messages::{self, Message};
 use crate::db::{rules as rule_db, settings};
 use crate::ingest::MAX_TEXT;
-use crate::redact::{Household, Options, find_leak, redact, redact_known};
+use crate::redact::{Found, Household, Options, find_leak, redact_known, redact_with};
 use crate::rules::draft::{self, Request};
 
 fn llm_off() -> AppError {
@@ -40,7 +40,50 @@ struct DraftPage {
     host: String,
     model: String,
     household_empty: bool,
+    /// Where the analyzer is, when it is on and answered.
+    analyzer: String,
+    /// Why the analyzer's suggestions are missing, when it is on and didn't
+    /// answer.
+    analyzer_warning: String,
     error: String,
+}
+
+/// What the analyzer service found in the original message.
+#[derive(Default)]
+struct Analysis {
+    found: Vec<Found>,
+    host: String,
+    warning: String,
+}
+
+/// Asks the analyzer, if there is one. A failure only costs the
+/// suggestions: the household values and patterns still apply, and the admin
+/// is told.
+async fn analyze(state: &AppState, original: &str) -> Analysis {
+    let Some(client) = &state.inner.analyzer else {
+        return Analysis::default();
+    };
+    match client.analyze(original).await {
+        Ok(found) => {
+            state.inner.metrics.analyzer_call(true);
+            Analysis {
+                found,
+                host: client.host(),
+                warning: String::new(),
+            }
+        }
+        Err(e) => {
+            state.inner.metrics.analyzer_call(false);
+            tracing::warn!(error = %e, "the analyzer did not answer");
+            Analysis {
+                warning: format!(
+                    "The analyzer at {} did not answer ({e}), so names and places that are not in the household values are not replaced. Read the text on the right with care.",
+                    client.host()
+                ),
+                ..Analysis::default()
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -73,12 +116,18 @@ fn page(
     redacted: Option<String>,
     hint: String,
     redact_codes: bool,
+    analysis: Analysis,
     error: String,
 ) -> Result<DraftPage, AppError> {
     let client = state.inner.llm.as_ref().ok_or_else(llm_off)?;
     let original = message.text().unwrap_or_default();
     // What the automatic redaction found, whatever has been edited since.
-    let auto = redact(&original, household, Options { redact_codes });
+    let auto = redact_with(
+        &original,
+        household,
+        Options { redact_codes },
+        &analysis.found,
+    );
     let counts = counts(&auto);
     let redacted = redacted.unwrap_or(auto.text);
     Ok(DraftPage {
@@ -98,6 +147,8 @@ fn page(
         host: client.host(),
         model: client.model().to_string(),
         household_empty: household.is_empty(),
+        analyzer: analysis.host,
+        analyzer_warning: analysis.warning,
         error,
     })
 }
@@ -113,6 +164,7 @@ pub async fn form(
     Query(q): Query<FormQuery>,
 ) -> Result<Response, AppError> {
     let (message, household) = load(&state, q.message).await?;
+    let analysis = analyze(&state, &message.text().unwrap_or_default()).await;
     let p = page(
         &state,
         &session,
@@ -122,6 +174,7 @@ pub async fn form(
         None,
         String::new(),
         false,
+        analysis,
         String::new(),
     )?;
     Ok(Html(p.render()?).into_response())
@@ -158,9 +211,12 @@ pub async fn draft(
     if hint.len() > 500 {
         return Err(AppError::BadRequest("the description is too long".into()));
     }
+    let text = message.text().unwrap_or_default();
+    let analysis = || analyze(&state, &text);
     let show = |redacted: Option<String>,
                 error: String,
-                status: StatusCode|
+                status: StatusCode,
+                analysis: Analysis|
      -> Result<Response, AppError> {
         let p = page(
             &state,
@@ -171,13 +227,14 @@ pub async fn draft(
             redacted,
             hint.clone(),
             redact_codes,
+            analysis,
             error,
         )?;
         Ok((status, Html(p.render()?)).into_response())
     };
     // "Redact again" throws the edits away and starts from the original.
     if form.action != "send" {
-        return show(None, String::new(), StatusCode::OK);
+        return show(None, String::new(), StatusCode::OK, analysis().await);
     }
     let redacted = form.redacted.replace("\r\n", "\n");
     if redacted.trim().is_empty() {
@@ -185,6 +242,7 @@ pub async fn draft(
             Some(redacted),
             "There is nothing to send.".into(),
             StatusCode::UNPROCESSABLE_ENTITY,
+            analysis().await,
         );
     }
     if redacted.len() > MAX_TEXT {
@@ -192,6 +250,7 @@ pub async fn draft(
             Some(redacted),
             format!("The text is longer than {} KiB.", MAX_TEXT / 1024),
             StatusCode::UNPROCESSABLE_ENTITY,
+            analysis().await,
         );
     }
     // Refused here, before anything is built to send: a household value is
@@ -205,6 +264,7 @@ pub async fn draft(
                     kind.label().to_lowercase()
                 ),
                 StatusCode::UNPROCESSABLE_ENTITY,
+                analysis().await,
             );
         }
     }
@@ -237,7 +297,12 @@ pub async fn draft(
             .llm_call(call.ok, call.input_tokens, call.output_tokens);
     }
     if let Some(error) = drafted.error {
-        return show(Some(redacted), error, StatusCode::BAD_GATEWAY);
+        return show(
+            Some(redacted),
+            error,
+            StatusCode::BAD_GATEWAY,
+            analysis().await,
+        );
     }
     let Some(yaml) = drafted.yaml else {
         return show(
@@ -248,6 +313,7 @@ pub async fn draft(
                 drafted.problems.join(" ")
             ),
             StatusCode::BAD_GATEWAY,
+            analysis().await,
         );
     };
     // Into the editor, to be reviewed, edited and saved. The original is the

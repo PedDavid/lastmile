@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod config;
 pub mod couriers;
 pub mod db;

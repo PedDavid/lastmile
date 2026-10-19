@@ -51,7 +51,13 @@ pub fn harness() -> Harness {
 /// [`harness`] with the rule-drafting model at `llm_url` (an OpenAI-style
 /// API, normally a mock).
 pub fn harness_llm(llm_url: &str) -> Harness {
-    let cfg = Config::try_parse_from([
+    harness_analyzer(llm_url, None)
+}
+
+/// [`harness_llm`] with a Presidio analyzer at `analyzer_url` (normally a
+/// mock).
+pub fn harness_analyzer(llm_url: &str, analyzer_url: Option<&str>) -> Harness {
+    let mut args = vec![
         "lastmile",
         "--oidc-issuer",
         "https://idp.example.com",
@@ -61,13 +67,19 @@ pub fn harness_llm(llm_url: &str) -> Harness {
         "test-model",
         "--llm-base-url",
         llm_url,
-    ])
-    .unwrap();
+    ];
+    if let Some(url) = analyzer_url {
+        args.extend(["--presidio-url", url]);
+    }
+    let cfg = Config::try_parse_from(args).unwrap();
     let db = Db::open_in_memory().unwrap();
     let auth = AuthMode::from_config(&cfg.auth, &cfg.public_url, false).unwrap();
     let key = Key::generate();
     let llm = lastmile::llm::Client::from_config(&cfg.llm).unwrap();
-    let state = AppState::new(cfg, db.clone(), auth, key.clone()).with_llm(llm);
+    let analyzer = lastmile::analyzer::Client::from_config(&cfg.analyzer).unwrap();
+    let state = AppState::new(cfg, db.clone(), auth, key.clone())
+        .with_llm(llm)
+        .with_analyzer(analyzer);
     Harness {
         app: router(state.with_fixed_now(NOW.parse().unwrap())),
         db,

@@ -28,7 +28,8 @@ Drafting is off until a model is configured. It then shows up for admins as
 
 Redaction is a net, not a guarantee: a name you didn't list, or an order number
 that looks like a phone number, can slip through or be replaced wrongly.
-Read the redacted text.
+Read the redacted text. An analyzer service can catch more names
+([below](#finding-more-names-with-presidio)).
 
 ## What happens to the answer
 
@@ -99,7 +100,58 @@ llm:
     existingSecret: lastmile-llm       # a Secret with the key `api-key`; leave empty if none
 ```
 
+## Finding more names with Presidio
+
+The household list only knows the people you wrote down. A
+[Presidio](https://microsoft.github.io/presidio/) analyzer, a small service
+that runs a language model over the text, also finds a name or place that isn't
+on it (the neighbour who collects for you, a pickup point's street). It is
+**optional and off by default**.
+
+With `--presidio-url` set, the draft page sends the *original* message to the
+analyzer and replaces what it finds with the same placeholders (a second name
+becomes `‹NAME_2›`). The page says so, and where the analyzer is. Because it is
+sent the original, **it should run in your cluster**, which is what the chart's
+option below does; pointing it at a hosted service would send that service the
+message you are protecting.
+
+| Flag | |
+|---|---|
+| `--presidio-url` | Base URL of the analyzer (before `/analyze`). Turns it on |
+| `--presidio-language` | Default `en` |
+| `--presidio-entities` | Default `PERSON,LOCATION`: names, and places as addresses |
+| `--presidio-score` | Lowest score acted on, default `0.5` |
+| `--presidio-timeout` | Default `10s` |
+
+What it adds is a suggestion, in the same editable text as everything else, and
+it changes nothing else: the household values and patterns still apply and win
+where they overlap, and the last check still refuses a request that holds a
+household value. If the analyzer is down or slow, the page says so and shows
+the redaction without it.
+
+**What to expect.** The stock image knows English only (spaCy
+`en_core_web_lg`), and asking it for another language fails. On Portuguese
+messages it still finds the names, but not always the streets and cities, and
+it can take a greeting into the name (`Olá Joana Ferreira` becomes `‹NAME_1›`).
+For Portuguese proper you'd build an analyzer image with a Portuguese NLP model
+and configuration (see Presidio's docs on
+[languages](https://microsoft.github.io/presidio/analyzer/languages/)), and set
+`presidio.image` and `presidio.language`.
+
+### Helm
+
+```yaml
+presidio:
+  enabled: true     # starts the analyzer with the release, reachable only inside the cluster
+  # url: http://presidio.tools.svc:3000   # or use one that already runs (and leave enabled off)
+```
+
+The pod runs as a non-root user with a read-only filesystem and no
+capabilities, needs about 1 GiB of memory, and takes about a minute to load its
+model before it is ready. Nothing is stored.
+
 ## Metrics
 
 `lastmile_llm_requests_total{result}` (`ok`, `error`) and
-`lastmile_llm_tokens_total{kind}` (`input`, `output`).
+`lastmile_llm_tokens_total{kind}` (`input`, `output`);
+`lastmile_analyzer_requests_total{result}` for the analyzer.

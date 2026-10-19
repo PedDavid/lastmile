@@ -569,11 +569,37 @@ fn render(text: &str, accepted: &[Span]) -> Redacted {
     Redacted { text: out, counts }
 }
 
+/// Something an analyzer service found in the text: a byte range of it and
+/// what kind of thing it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Found {
+    pub start: usize,
+    pub end: usize,
+    pub kind: Kind,
+}
+
 /// Redacts `text`.
 pub fn redact(text: &str, household: &Household, opts: Options) -> Redacted {
+    redact_with(text, household, opts, &[])
+}
+
+/// Redacts `text`, and also what an analyzer `found` in it. A found value
+/// weighs less than the household's and than a pattern's, so where they
+/// overlap theirs stands; the same value found twice shares a placeholder.
+pub fn redact_with(text: &str, household: &Household, opts: Options, found: &[Found]) -> Redacted {
     let mut spans = Vec::new();
     known_spans(text, household, &mut spans);
     pattern_spans(text, opts, &mut spans);
+    for f in found {
+        if f.start < f.end
+            && f.end <= text.len()
+            && text.is_char_boundary(f.start)
+            && text.is_char_boundary(f.end)
+        {
+            let key: String = fold(&text[f.start..f.end]).chars.into_iter().collect();
+            push(&mut spans, f.start, f.end, f.kind, false, &key);
+        }
+    }
     render(text, &resolve(spans))
 }
 
@@ -800,6 +826,81 @@ mod tests {
         assert_eq!(
             Household::parse_lines(" Ana \n\nDavid\r\nAna\n"),
             ["Ana", "David"]
+        );
+    }
+    fn found(text: &str, needle: &str, kind: Kind) -> Found {
+        let start = text.find(needle).unwrap();
+        Found {
+            start,
+            end: start + needle.len(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn what_an_analyzer_found_gets_a_placeholder_after_the_households() {
+        let text = "Olá Ana, levantar com Joana Mendes e com Joana Mendes. Rua Augusta";
+        let f = [
+            found(text, "Joana Mendes", Kind::Name),
+            Found {
+                start: text.rfind("Joana Mendes").unwrap(),
+                end: text.rfind("Joana Mendes").unwrap() + "Joana Mendes".len(),
+                kind: Kind::Name,
+            },
+            found(text, "Rua Augusta", Kind::Address),
+        ];
+        let r = redact_with(text, &household(), Options::default(), &f);
+        assert_eq!(
+            r.text,
+            "Olá ‹NAME_1›, levantar com ‹NAME_2› e com ‹NAME_2›. ‹ADDRESS_1›"
+        );
+        assert_eq!(r.counts.get("NAME"), Some(&2));
+    }
+
+    #[test]
+    fn a_finding_loses_to_the_household_and_to_patterns_where_they_overlap() {
+        let text = "Ana Ferreira, ana@example.com, 912 345 678";
+        let f = [
+            // Inside the household's name, over an email, over a phone number.
+            found(text, "Ferreira", Kind::Name),
+            found(text, "example", Kind::Name),
+            found(text, "345 678", Kind::Name),
+        ];
+        let r = redact_with(text, &household(), Options::default(), &f);
+        assert_eq!(r.text, "‹NAME_1›, ‹EMAIL_1›, ‹PHONE_1›");
+    }
+
+    #[test]
+    fn findings_that_do_not_fit_the_text_are_ignored() {
+        let text = "Olá Ana é aqui";
+        let f = [
+            Found {
+                start: 0,
+                end: 999,
+                kind: Kind::Name,
+            },
+            // Inside the two bytes of "é".
+            Found {
+                start: text.find('é').unwrap() + 1,
+                end: text.find('é').unwrap() + 2,
+                kind: Kind::Name,
+            },
+            Found {
+                start: 5,
+                end: 5,
+                kind: Kind::Name,
+            },
+        ];
+        let r = redact_with(text, &household(), Options::default(), &f);
+        assert_eq!(r.text, "Olá ‹NAME_1› é aqui");
+    }
+
+    #[test]
+    fn redact_is_redact_with_nothing_found() {
+        let text = "Olá Ana Ferreira, 1250-096 Lisboa";
+        assert_eq!(
+            redact(text, &household(), Options::default()),
+            redact_with(text, &household(), Options::default(), &[])
         );
     }
 }

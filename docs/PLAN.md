@@ -288,6 +288,11 @@ placeholders that keep the text's shape, e.g. `‹NAME_1›`, `‹ADDRESS_1›`,
   check digit validated to avoid false positives), IBAN, card numbers (Luhn),
   query strings and path tokens of URLs (keep the host), and the greeting
   line's name (`Olá <name>`, `Caro(a) <name>`).
+- **Optional analyzer.** A Presidio analyzer in the cluster (`--presidio-url`)
+  is asked for people and places in the original, and what it finds gets the
+  same placeholders, below the household values and the patterns in priority.
+  It is only a suggestion on the draft page: if it is down the page says so,
+  and the household values still apply.
 - **Not redacted:** tracking numbers, delivery/pickup codes, merchant and
   courier names, dates. They are what the rule has to find. The code is
   replaced with a same-length placeholder of the same character class
@@ -375,6 +380,7 @@ Served on `:9090/metrics` with `/healthz` and `/readyz`, as in the other apps.
 | `lastmile_messages_total{channel, result}` | |
 | `lastmile_rules{origin, enabled}` | |
 | `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | |
+| `lastmile_analyzer_requests_total{result}` | |
 
 Shipped alert rules: `PackageWaitingForPickup` (ready for more than 3 days,
 CTT holds items for a limited time), `PackagePickupEnding`,

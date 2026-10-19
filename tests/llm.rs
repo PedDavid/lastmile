@@ -78,7 +78,17 @@ async fn mock_model(answer: Value) -> MockServer {
 
 /// An app with a household, an unmatched message in the inbox and a model.
 async fn setup(server: &MockServer) -> (Harness, String) {
-    let h = harness_llm(&format!("{}/v1", server.uri()));
+    setup_with(server, None, ORIGINAL).await
+}
+
+/// [`setup`] with a Presidio analyzer at `analyzer_url`, and the message
+/// to be `text`.
+async fn setup_with(
+    server: &MockServer,
+    analyzer_url: Option<&str>,
+    text: &str,
+) -> (Harness, String) {
+    let h = harness_analyzer(&format!("{}/v1", server.uri()), analyzer_url);
     let admin = session_cookie(&h.key, &session(true));
     h.db.blocking(|c| settings::set_household(c, &household()))
         .unwrap();
@@ -93,8 +103,8 @@ async fn setup(server: &MockServer) -> (Harness, String) {
                 subject: None,
                 sent_at: None,
                 message_id: None,
-                text: ORIGINAL.into(),
-                raw: ORIGINAL.as_bytes().to_vec(),
+                text: text.into(),
+                raw: text.as_bytes().to_vec(),
             },
             jiff::SignedDuration::from_hours(24),
             "2026-10-18T12:00:00Z".parse().unwrap(),
@@ -146,6 +156,122 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
     .await;
     assert!(html.contains("‹CODE:dddd›"), "{html}");
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A Presidio mock that finds `needle` (a person) in whatever it is sent.
+/// Positions are in characters, as Presidio's are.
+async fn mock_analyzer(needle: &'static str) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/analyze"))
+        .respond_with(move |req: &wiremock::Request| {
+            let sent: Value = serde_json::from_slice(&req.body).unwrap();
+            let text = sent["text"].as_str().unwrap();
+            let at = text.find(needle).expect("the message has the name");
+            let start = text[..at].chars().count();
+            ResponseTemplate::new(200).set_body_json(json!([{
+                "entity_type": "PERSON",
+                "start": start,
+                "end": start + needle.chars().count(),
+                "score": 0.85,
+            }]))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+fn textarea(page: &str) -> String {
+    let start = page.find("Redacted message\">").unwrap() + "Redacted message\">".len();
+    html_unescape(&page[start..page[start..].find("</textarea>").unwrap() + start])
+}
+
+const WITH_PICKUP_NAME: &str = "Paack: Olá Ana Ferreira, a sua encomenda PCK7Q2W9D da Worten será entregue hoje. Levantar com Joana Mendes. Código de entrega 5527.";
+
+#[tokio::test]
+async fn the_analyzer_finds_a_name_the_household_does_not_list() {
+    let model = mock_model(good_draft()).await;
+    let analyzer = mock_analyzer("Joana Mendes").await;
+    let (h, admin) = setup_with(&model, Some(&analyzer.uri()), WITH_PICKUP_NAME).await;
+    let page = body(
+        h.app
+            .clone()
+            .oneshot(get("/rules/draft?message=1", &admin))
+            .await
+            .unwrap(),
+    )
+    .await;
+    // The analyzer was sent the original, once, in the configured language.
+    let asked = analyzer.received_requests().await.unwrap();
+    assert_eq!(asked.len(), 1);
+    let asked: Value = serde_json::from_slice(&asked[0].body).unwrap();
+    assert_eq!(asked["text"], WITH_PICKUP_NAME);
+    assert_eq!(asked["language"], "en");
+    assert_eq!(asked["entities"], json!(["PERSON", "LOCATION"]));
+    // Its finding is a placeholder next to the household's, and the page
+    // says where it came from.
+    let redacted = textarea(&page);
+    assert!(
+        redacted.contains("Olá ‹NAME_1›") && redacted.contains("Levantar com ‹NAME_2›"),
+        "{redacted}"
+    );
+    assert!(!redacted.contains("Joana") && !redacted.contains("Mendes"));
+    assert!(page.contains("looked for by the analyzer"), "{page}");
+    assert!(model.received_requests().await.unwrap().is_empty());
+
+    // What is sent is the proposal, so the model never sees the name.
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/rules/draft",
+            &admin,
+            &[
+                ("_csrf", "csrf-token"),
+                ("message_id", "1"),
+                ("action", "send"),
+                ("redacted", &redacted),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let requests = model.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let sent = String::from_utf8(requests[0].body.clone()).unwrap();
+    for secret in ["Joana", "Mendes", "Ferreira"] {
+        assert!(!sent.contains(secret), "{secret} was sent: {sent}");
+    }
+    // Sending asks nothing of the analyzer again.
+    assert_eq!(analyzer.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn an_analyzer_that_fails_costs_the_suggestions_and_says_so() {
+    let model = mock_model(good_draft()).await;
+    let analyzer = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/analyze"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({"error": "no model"})))
+        .mount(&analyzer)
+        .await;
+    let (h, admin) = setup_with(&model, Some(&analyzer.uri()), WITH_PICKUP_NAME).await;
+    let res = h
+        .app
+        .clone()
+        .oneshot(get("/rules/draft?message=1", &admin))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let page = body(res).await;
+    assert!(page.contains("did not answer"), "{page}");
+    assert!(page.contains("answered 500"), "{page}");
+    // The household's values are still replaced; the other name is not, and
+    // the page said to read the text.
+    let redacted = textarea(&page);
+    assert!(redacted.contains("Olá ‹NAME_1›"), "{redacted}");
+    assert!(redacted.contains("Joana Mendes"), "{redacted}");
+    assert!(!page.contains("looked for by the analyzer"), "{page}");
 }
 
 #[tokio::test]

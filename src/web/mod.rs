@@ -47,6 +47,9 @@ pub struct Inner {
     pub metrics: Arc<Metrics>,
     /// The model that drafts rules; `None` leaves the feature off.
     pub llm: Option<crate::llm::Client>,
+    /// Finds names and places the household values miss; `None` leaves
+    /// redaction to those and the patterns.
+    pub analyzer: Option<crate::analyzer::Client>,
     pub auth: AuthMode,
     pub rate_limiter: api::RateLimiter,
     pub cookie_key: Key,
@@ -62,6 +65,7 @@ impl AppState {
                 cfg,
                 metrics: Metrics::new(db.clone()),
                 llm: None,
+                analyzer: None,
                 db,
                 auth,
                 rate_limiter: api::RateLimiter::default(),
@@ -77,6 +81,14 @@ impl AppState {
         Arc::get_mut(&mut self.inner)
             .expect("the LLM is set before the state is shared")
             .llm = llm;
+        self
+    }
+
+    /// Adds the analyzer that suggests more to redact.
+    pub fn with_analyzer(mut self, analyzer: Option<crate::analyzer::Client>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("the analyzer is set before the state is shared")
+            .analyzer = analyzer;
         self
     }
 

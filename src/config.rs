@@ -57,6 +57,9 @@ pub struct Config {
     #[command(flatten)]
     pub llm: LlmConfig,
 
+    #[command(flatten)]
+    pub analyzer: AnalyzerConfig,
+
     /// Serve sample packages from a temporary in-memory database. Uses
     /// --insecure-dev-auth unless OIDC is configured. For trying out the UI only.
     #[arg(long, env = "LASTMILE_DEMO")]
@@ -156,6 +159,41 @@ pub struct LlmConfig {
     pub llm_timeout: SignedDuration,
 }
 
+/// A Presidio analyzer service that finds the names and places in a message
+/// that the household values and patterns miss. Off unless
+/// `--presidio-url` is set.
+#[derive(clap::Args, Debug, Clone)]
+pub struct AnalyzerConfig {
+    /// Base URL of the Presidio analyzer (the part before `/analyze`). It is
+    /// sent the original message, so it should be a service in the same
+    /// cluster. Fixed by the deployment: never taken from a request.
+    #[arg(long, env = "LASTMILE_PRESIDIO_URL")]
+    pub presidio_url: Option<Url>,
+
+    /// Language of the messages, as the analyzer's NLP engine knows it.
+    #[arg(long, env = "LASTMILE_PRESIDIO_LANGUAGE", default_value = "en")]
+    pub presidio_language: String,
+
+    /// Entity types to ask for. `PERSON` and `LOCATION` become names and
+    /// addresses; the others it knows (phone numbers, emails, IBANs, cards)
+    /// are already found here.
+    #[arg(
+        long,
+        env = "LASTMILE_PRESIDIO_ENTITIES",
+        value_delimiter = ',',
+        default_value = "PERSON,LOCATION"
+    )]
+    pub presidio_entities: Vec<String>,
+
+    /// Lowest score (0 to 1) of a finding that is acted on.
+    #[arg(long, env = "LASTMILE_PRESIDIO_SCORE", default_value_t = 0.5)]
+    pub presidio_score: f32,
+
+    /// Timeout of the request to the analyzer.
+    #[arg(long, env = "LASTMILE_PRESIDIO_TIMEOUT", default_value = "10s", value_parser = parse_duration)]
+    pub presidio_timeout: SignedDuration,
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LlmApi {
     Chat,
@@ -194,8 +232,17 @@ impl Config {
         if !matches!(self.llm.llm_base_url.scheme(), "http" | "https") {
             return Err("--llm-base-url must be an http(s) URL".into());
         }
+        if let Some(url) = &self.analyzer.presidio_url
+            && !matches!(url.scheme(), "http" | "https")
+        {
+            return Err("--presidio-url must be an http(s) URL".into());
+        }
+        if !(0.0..=1.0).contains(&self.analyzer.presidio_score) {
+            return Err("--presidio-score must be between 0 and 1".into());
+        }
         for (flag, d) in [
             ("--llm-timeout", self.llm.llm_timeout),
+            ("--presidio-timeout", self.analyzer.presidio_timeout),
             ("--stale-after", self.stale_after),
             ("--archive-after", self.archive_after),
             ("--message-retention", self.message_retention),
@@ -216,6 +263,30 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_analyzer_is_off_until_a_url_is_set() {
+        let cfg = Config::try_parse_from(["lastmile"]).unwrap();
+        assert!(cfg.analyzer.presidio_url.is_none());
+        assert_eq!(cfg.analyzer.presidio_entities, ["PERSON", "LOCATION"]);
+        let cfg = Config::try_parse_from([
+            "lastmile",
+            "--presidio-url",
+            "http://presidio:3000",
+            "--presidio-entities",
+            "PERSON",
+            "--presidio-language",
+            "pt",
+        ])
+        .unwrap();
+        assert!(cfg.check().is_ok());
+        assert_eq!(cfg.analyzer.presidio_entities, ["PERSON"]);
+        assert_eq!(cfg.analyzer.presidio_language, "pt");
+        let cfg = Config::try_parse_from(["lastmile", "--presidio-url", "ftp://x"]).unwrap();
+        assert!(cfg.check().is_err());
+        let cfg = Config::try_parse_from(["lastmile", "--presidio-score", "1.5"]).unwrap();
+        assert!(cfg.check().is_err());
+    }
 
     #[test]
     fn defaults_parse() {

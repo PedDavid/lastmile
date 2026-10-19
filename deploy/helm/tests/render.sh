@@ -47,6 +47,26 @@ llm=$(render --set llm.model=gpt-x --set llm.apiKey.existingSecret=llm-key | yq 
 nokey=$(render --set llm.model=local --set llm.baseUrl=http://ollama:11434/v1 | yq 'select(.kind == "Deployment")')
 [[ -z $(yq '.spec.template.spec.volumes[] | select(.name == "llm")' <<<"$nokey") ]] || fail "a Secret is mounted without a key"
 
+# The analyzer is off by default; enabling it starts a cluster-internal
+# Service the app is pointed at, which the app's own Service does not select.
+grep -q LASTMILE_PRESIDIO_URL <<<"$env" && fail "the analyzer is on by default"
+[[ -z $(yq 'select(.metadata.name == "lastmile-presidio")' <<<"$out") ]] || fail "the analyzer is rendered by default"
+pres=$(render --set presidio.enabled=true)
+[[ $(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile") | .spec.template.spec.containers[0].env[] | select(.name == "LASTMILE_PRESIDIO_URL") | .value' <<<"$pres") == http://lastmile-presidio.default.svc:3000 ]] \
+  || fail "the app is not pointed at the analyzer it starts"
+[[ $(yq 'select(.kind == "Service" and .metadata.name == "lastmile-presidio") | .spec.type' <<<"$pres") == ClusterIP ]] \
+  || fail "the analyzer Service is not ClusterIP"
+app_selector=$(yq 'select(.kind == "Service" and .metadata.name == "lastmile") | .spec.selector."app.kubernetes.io/name"' <<<"$pres")
+pod_name=$(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile-presidio") | .spec.template.metadata.labels."app.kubernetes.io/name"' <<<"$pres")
+[[ -n $pod_name && $pod_name != "$app_selector" ]] || fail "the app's Service would select the analyzer pod"
+[[ $(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile-presidio") | .spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem' <<<"$pres") == true ]] \
+  || fail "the analyzer's filesystem is writable"
+ext=$(render --set presidio.url=http://presidio.tools:3000 | yq 'select(.kind == "Deployment" and .metadata.name == "lastmile")')
+[[ $(yq '.spec.template.spec.containers[0].env[] | select(.name == "LASTMILE_PRESIDIO_URL") | .value' <<<"$ext") == http://presidio.tools:3000 ]] \
+  || fail "an existing analyzer's URL is not used"
+[[ -z $(render --set presidio.url=http://presidio.tools:3000 | yq 'select(.metadata.name == "lastmile-presidio")') ]] \
+  || fail "an analyzer is started although one is given"
+
 # The default image tag is the chart's appVersion, which the release
 # workflow publishes (see .github/workflows/release.yml).
 app=$(yq '.appVersion' "$chart/Chart.yaml")
