@@ -327,6 +327,13 @@ pub fn set_archived(conn: &Connection, id: i64, at: Option<Timestamp>) -> rusqli
     Ok(n == 1)
 }
 
+/// Removes a package for good. Its events go with it; linked messages stay,
+/// unlinked.
+pub fn delete(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
+    let n = conn.execute("DELETE FROM packages WHERE id = ?1", params![id])?;
+    Ok(n == 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -35,6 +35,7 @@
         <button type="submit" class="btn" data-variant="ghost">{% include "icons/archive-restore.svg" %} Unarchive</button>
       </form>
       {% endif %}
+      <button type="button" class="btn" data-variant="ghost" data-dialog-open="delete-dialog">{% include "icons/trash-2.svg" %} Delete</button>
     </div>
   </div>
 
@@ -166,6 +167,21 @@
     <footer>
       <button type="button" class="btn" data-variant="outline" data-dialog-close>Cancel</button>
       <button type="submit" class="btn">Save</button>
+    </footer>
+    <button type="button" data-dialog-close aria-label="Close">{% include "icons/x.svg" %}</button>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" class="dialog" aria-labelledby="delete-title">
+  <form method="post" action="/packages/{{ p.row.id }}/delete" class="w-full sm:max-w-md">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <header>
+      <h2 id="delete-title">Delete this package?</h2>
+      <p>This removes it and its history for good. Archive it instead to keep it searchable.</p>
+    </header>
+    <footer>
+      <button type="button" class="btn" data-variant="outline" data-dialog-close>Cancel</button>
+      <button type="submit" class="btn" data-variant="destructive">Delete</button>
     </footer>
     <button type="button" data-dialog-close aria-label="Close">{% include "icons/x.svg" %}</button>
   </form>

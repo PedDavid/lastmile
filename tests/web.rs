@@ -240,12 +240,35 @@ async fn household_members_add_edit_and_archive_packages() {
     assert!(!html.contains("Trail shoes"), "{html}");
     let html = body(
         h.app
+            .clone()
             .oneshot(get("/?show=archived", &cookie))
             .await
             .unwrap(),
     )
     .await;
     assert!(html.contains("Trail shoes"), "{html}");
+
+    // Deleting removes it entirely, history included.
+    let res = h
+        .app
+        .clone()
+        .oneshot(form_post("/packages/1/delete", &cookie, "_csrf=csrf-token"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()[header::LOCATION], "/");
+    assert!(h.db.blocking(|c| packages::get(c, 1)).unwrap().is_none());
+    assert!(
+        h.db.blocking(|c| packages::events(c, 1))
+            .unwrap()
+            .is_empty()
+    );
+    let res = h
+        .app
+        .oneshot(form_post("/packages/1/delete", &cookie, "_csrf=csrf-token"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
