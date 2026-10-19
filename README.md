@@ -85,6 +85,7 @@ Computed from the database on every scrape.
 | `lastmile_package_ready_since_timestamp_seconds{id, courier}` | When each package waiting at a pickup point got there |
 | `lastmile_package_code_expiry_timestamp_seconds{id}` | When its pickup period ends, if known |
 | `lastmile_inbox_messages{result}` | Messages waiting in the inbox: `unmatched`, `error`, or `matched` follow-ups to attach |
+| `lastmile_build_info{version}` | Always 1; the label is the running version |
 | `lastmile_messages_total{channel, result}` | Messages received |
 | `lastmile_rules{origin, enabled}` | |
 | `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | Requests to and tokens used by the model that drafts rules |

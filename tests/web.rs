@@ -338,3 +338,19 @@ async fn metrics_count_packages() {
         "{text}"
     );
 }
+
+#[tokio::test]
+async fn metrics_report_the_version() {
+    let h = harness();
+    let ops = lastmile::web::ops_router(h.db.clone(), lastmile::metrics::Metrics::new(h.db));
+    let res = ops
+        .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let text = body(res).await;
+    let want = format!(
+        r#"lastmile_build_info{{version="{}"}} 1"#,
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(text.contains(&want), "{text}");
+}
