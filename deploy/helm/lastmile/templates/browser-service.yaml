@@ -1,0 +1,19 @@
+{{- if .Values.browser.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lastmile.browserName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lastmile.browserSelectorLabels" . | nindent 4 }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  # Cluster-internal only: whoever reaches the browser controls it.
+  type: ClusterIP
+  selector:
+    {{- include "lastmile.browserSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: cdp
+      port: {{ .Values.browser.port }}
+      targetPort: cdp
+{{- end }}

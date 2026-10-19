@@ -24,6 +24,12 @@ pub struct MessageLabels {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct CourierLabels {
+    pub courier: String,
+    pub result: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct ResultLabels {
     pub result: String,
 }
@@ -33,12 +39,15 @@ pub struct KindLabels {
     pub kind: String,
 }
 
+const COURIER_RESULTS: [&str; 3] = ["ok", "empty", "error"];
+
 pub struct Metrics {
     registry: Registry,
     messages: Family<MessageLabels, Counter>,
     llm_requests: Family<ResultLabels, Counter>,
     llm_tokens: Family<KindLabels, Counter>,
     analyzer_requests: Family<ResultLabels, Counter>,
+    courier_checks: Family<CourierLabels, Counter>,
 }
 
 impl Metrics {
@@ -91,6 +100,18 @@ impl Metrics {
             "Requests to the analyzer that suggests what to redact, by result",
             analyzer_requests.clone(),
         );
+        let courier_checks = Family::<CourierLabels, Counter>::default();
+        for result in COURIER_RESULTS {
+            let _ = courier_checks.get_or_create(&CourierLabels {
+                courier: "CTT".into(),
+                result: result.into(),
+            });
+        }
+        registry.register(
+            "lastmile_courier_checks",
+            "Packages checked with a courier's tracking page, by courier and result (ok, empty: nothing recognised on the page, error)",
+            courier_checks.clone(),
+        );
         registry.register_collector(Box::new(PackageCollector { db }));
         std::sync::Arc::new(Metrics {
             registry,
@@ -98,6 +119,7 @@ impl Metrics {
             llm_requests,
             llm_tokens,
             analyzer_requests,
+            courier_checks,
         })
     }
 
@@ -113,6 +135,17 @@ impl Metrics {
                 .get_or_create(&KindLabels { kind: kind.into() })
                 .inc_by(n);
         }
+    }
+
+    /// One package checked with a courier: `ok`, `empty` or `error`.
+    pub fn courier_check(&self, courier: &str, result: &str) {
+        debug_assert!(COURIER_RESULTS.contains(&result));
+        self.courier_checks
+            .get_or_create(&CourierLabels {
+                courier: courier.into(),
+                result: result.into(),
+            })
+            .inc();
     }
 
     /// One request to the analyzer.

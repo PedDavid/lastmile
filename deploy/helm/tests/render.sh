@@ -67,6 +67,29 @@ ext=$(render --set presidio.url=http://presidio.tools:3000 | yq 'select(.kind ==
 [[ -z $(render --set presidio.url=http://presidio.tools:3000 | yq 'select(.metadata.name == "lastmile-presidio")') ]] \
   || fail "an analyzer is started although one is given"
 
+# Courier tracking is off by default; enabling the browser starts a
+# cluster-internal Chromium the app is pointed at, locked down and apart from
+# the app's own Service.
+grep -q LASTMILE_BROWSER_URL <<<"$env" && fail "the browser is on by default"
+[[ -z $(yq 'select(.metadata.name == "lastmile-chromium")' <<<"$out") ]] || fail "the browser is rendered by default"
+br=$(render --set browser.enabled=true)
+[[ $(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile") | .spec.template.spec.containers[0].env[] | select(.name == "LASTMILE_BROWSER_URL") | .value' <<<"$br") == http://lastmile-chromium.default.svc:9222 ]] \
+  || fail "the app is not pointed at the browser it starts"
+[[ $(yq 'select(.kind == "Service" and .metadata.name == "lastmile-chromium") | .spec.type' <<<"$br") == ClusterIP ]] \
+  || fail "the browser Service is not ClusterIP"
+br_name=$(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile-chromium") | .spec.template.metadata.labels."app.kubernetes.io/name"' <<<"$br")
+br_app=$(yq 'select(.kind == "Service" and .metadata.name == "lastmile") | .spec.selector."app.kubernetes.io/name"' <<<"$br")
+[[ -n $br_name && $br_name != "$br_app" ]] || fail "the app's Service would select the browser pod"
+chromium=$(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile-chromium") | .spec.template.spec.containers[0]' <<<"$br")
+[[ $(yq '.securityContext.readOnlyRootFilesystem' <<<"$chromium") == true ]] || fail "the browser's filesystem is writable"
+[[ $(yq '.securityContext.capabilities.drop[0]' <<<"$chromium") == ALL ]] || fail "the browser keeps capabilities"
+[[ $(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile-chromium") | .spec.template.spec.securityContext.runAsNonRoot' <<<"$br") == true ]] \
+  || fail "the browser runs as root"
+brext=$(render --set browser.url=http://chromium.tools:9222)
+[[ $(yq 'select(.kind == "Deployment" and .metadata.name == "lastmile") | .spec.template.spec.containers[0].env[] | select(.name == "LASTMILE_BROWSER_URL") | .value' <<<"$brext") == http://chromium.tools:9222 ]] \
+  || fail "an existing browser's URL is not used"
+[[ -z $(yq 'select(.metadata.name == "lastmile-chromium")' <<<"$brext") ]] || fail "a browser is started although one is given"
+
 # The default image tag is the chart's appVersion, which the release
 # workflow publishes (see .github/workflows/release.yml).
 app=$(yq '.appVersion' "$chart/Chart.yaml")

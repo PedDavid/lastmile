@@ -46,6 +46,15 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key)
         .with_llm(llm)
         .with_analyzer(analyzer);
+    if let Some(browser) = lastmile::browser::Client::from_config(&cfg.browser) {
+        info!(host = %browser.host(), interval = %cfg.browser.tracking_interval, "packages are checked with their courier");
+        tokio::spawn(lastmile::tracking::run(
+            db.clone(),
+            lastmile::tracking::browser_fetch(std::sync::Arc::new(browser)),
+            state.inner.metrics.clone(),
+            std::time::Duration::from_secs(cfg.browser.tracking_interval.as_secs().max(60) as u64),
+        ));
+    }
     let ops = web::ops_router(db, state.inner.metrics.clone());
     let app = web::router(state);
 

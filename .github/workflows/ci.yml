@@ -20,6 +20,15 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      # The browser client against a real headless Chromium: the same image
+      # (and version) the chart runs.
+      - name: Browser client
+        run: |
+          image=$(yq '.browser.image.repository + ":" + .browser.image.tag' deploy/helm/lastmile/values.yaml)
+          docker run -d --network host --shm-size=256m "$image"
+          for i in $(seq 1 30); do curl -sf localhost:9222/json/version >/dev/null && break; sleep 1; done
+          LASTMILE_TEST_BROWSER_URL=http://127.0.0.1:9222 \
+            cargo test --locked --test browser -- --ignored reads_what a_page_that_never
     env:
       # The screenshot tests are ignored here; the visual job runs them.
       PLAYWRIGHT_SKIP_DRIVER_DOWNLOAD: "1"

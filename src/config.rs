@@ -60,6 +60,9 @@ pub struct Config {
     #[command(flatten)]
     pub analyzer: AnalyzerConfig,
 
+    #[command(flatten)]
+    pub browser: BrowserConfig,
+
     /// Serve sample packages from a temporary in-memory database. Uses
     /// --insecure-dev-auth unless OIDC is configured. For trying out the UI only.
     #[arg(long, env = "LASTMILE_DEMO")]
@@ -194,6 +197,27 @@ pub struct AnalyzerConfig {
     pub presidio_timeout: SignedDuration,
 }
 
+/// A headless Chromium that reads courier tracking pages, which are web
+/// apps with nothing in their HTML until a browser runs them. Off unless
+/// `--browser-url` is set; then active packages with a tracking number are
+/// checked every `--tracking-interval`.
+#[derive(clap::Args, Debug, Clone)]
+pub struct BrowserConfig {
+    /// Where the browser's DevTools endpoint is (`http://host:9222`). A
+    /// service in the same cluster: this app only ever sends it the
+    /// couriers' fixed tracking pages. Fixed by the deployment.
+    #[arg(long, env = "LASTMILE_BROWSER_URL")]
+    pub browser_url: Option<Url>,
+
+    /// How long one tracking page may take to load and show its status.
+    #[arg(long, env = "LASTMILE_BROWSER_TIMEOUT", default_value = "60s", value_parser = parse_duration)]
+    pub browser_timeout: SignedDuration,
+
+    /// How often packages are checked with the couriers.
+    #[arg(long, env = "LASTMILE_TRACKING_INTERVAL", default_value = "2h", value_parser = parse_duration)]
+    pub tracking_interval: SignedDuration,
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LlmApi {
     Chat,
@@ -237,12 +261,19 @@ impl Config {
         {
             return Err("--presidio-url must be an http(s) URL".into());
         }
+        if let Some(url) = &self.browser.browser_url
+            && !matches!(url.scheme(), "http" | "https")
+        {
+            return Err("--browser-url must be an http(s) URL".into());
+        }
         if !(0.0..=1.0).contains(&self.analyzer.presidio_score) {
             return Err("--presidio-score must be between 0 and 1".into());
         }
         for (flag, d) in [
             ("--llm-timeout", self.llm.llm_timeout),
             ("--presidio-timeout", self.analyzer.presidio_timeout),
+            ("--browser-timeout", self.browser.browser_timeout),
+            ("--tracking-interval", self.browser.tracking_interval),
             ("--stale-after", self.stale_after),
             ("--archive-after", self.archive_after),
             ("--message-retention", self.message_retention),
@@ -285,6 +316,25 @@ mod tests {
         let cfg = Config::try_parse_from(["lastmile", "--presidio-url", "ftp://x"]).unwrap();
         assert!(cfg.check().is_err());
         let cfg = Config::try_parse_from(["lastmile", "--presidio-score", "1.5"]).unwrap();
+        assert!(cfg.check().is_err());
+    }
+
+    #[test]
+    fn courier_tracking_is_off_until_a_browser_is_set() {
+        let cfg = Config::try_parse_from(["lastmile"]).unwrap();
+        assert!(cfg.browser.browser_url.is_none());
+        assert_eq!(cfg.browser.tracking_interval, SignedDuration::from_hours(2));
+        let cfg = Config::try_parse_from([
+            "lastmile",
+            "--browser-url",
+            "http://chromium:9222",
+            "--tracking-interval",
+            "30m",
+        ])
+        .unwrap();
+        assert!(cfg.check().is_ok());
+        assert_eq!(cfg.browser.tracking_interval, SignedDuration::from_mins(30));
+        let cfg = Config::try_parse_from(["lastmile", "--browser-url", "ws://x"]).unwrap();
         assert!(cfg.check().is_err());
     }
 

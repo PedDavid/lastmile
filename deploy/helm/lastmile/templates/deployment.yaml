@@ -97,6 +97,15 @@ spec:
             - name: LASTMILE_PRESIDIO_TIMEOUT
               value: {{ .Values.presidio.timeout | quote }}
             {{- end }}
+            {{- $browser := include "lastmile.browserUrl" . }}
+            {{- if $browser }}
+            - name: LASTMILE_BROWSER_URL
+              value: {{ $browser | quote }}
+            - name: LASTMILE_BROWSER_TIMEOUT
+              value: {{ .Values.browser.timeout | quote }}
+            - name: LASTMILE_TRACKING_INTERVAL
+              value: {{ .Values.browser.interval | quote }}
+            {{- end }}
             {{- if .Values.logJson }}
             - name: LASTMILE_LOG_JSON
               value: "true"
