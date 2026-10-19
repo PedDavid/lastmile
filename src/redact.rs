@@ -83,6 +83,9 @@ pub enum Kind {
     Phone,
     Email,
     Nif,
+    /// A document or registration number: citizen card, NISS, passport,
+    /// SNS number, vehicle plate (found by an analyzer, not by patterns here).
+    Id,
     Iban,
     Card,
     Token,
@@ -98,6 +101,7 @@ impl Kind {
             Kind::Phone => "PHONE",
             Kind::Email => "EMAIL",
             Kind::Nif => "NIF",
+            Kind::Id => "ID",
             Kind::Iban => "IBAN",
             Kind::Card => "CARD",
             Kind::Token => "TOKEN",
@@ -118,6 +122,7 @@ impl Kind {
             Kind::Token => 70,
             Kind::Code => 65,
             Kind::Phone => 60,
+            Kind::Id => 55,
             Kind::Nif => 50,
             Kind::Postcode => 40,
             Kind::Name | Kind::Address => 30,
@@ -902,5 +907,15 @@ mod tests {
             redact(text, &household(), Options::default()),
             redact_with(text, &household(), Options::default(), &[])
         );
+    }
+    #[test]
+    fn document_numbers_found_by_an_analyzer_become_ids() {
+        let text = "NISS 12345678901 e matrícula AA-00-BB";
+        let f = [
+            found(text, "12345678901", Kind::Id),
+            found(text, "AA-00-BB", Kind::Id),
+        ];
+        let r = redact_with(text, &household(), Options::default(), &f);
+        assert_eq!(r.text, "NISS ‹ID_1› e matrícula ‹ID_2›");
     }
 }

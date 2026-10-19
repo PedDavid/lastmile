@@ -111,6 +111,15 @@ fn kind(entity: &str) -> Option<Kind> {
         "EMAIL_ADDRESS" => Kind::Email,
         "IBAN_CODE" => Kind::Iban,
         "CREDIT_CARD" => Kind::Card,
+        // The Portuguese recognizers of a Presidio image that has them.
+        "PT_NIF" => Kind::Nif,
+        "PT_PHONE_NUMBER" => Kind::Phone,
+        "PT_POSTAL_CODE" => Kind::Postcode,
+        "PT_CITIZEN_CARD"
+        | "PT_NISS"
+        | "PT_PASSPORT"
+        | "PT_SNS_NUMBER"
+        | "PT_VEHICLE_REGISTRATION" => Kind::Id,
         _ => return None,
     })
 }
@@ -177,6 +186,26 @@ mod tests {
             ],
         );
         assert!(found.is_empty());
+    }
+
+    #[test]
+    fn portuguese_entities_become_placeholders() {
+        let text = "NISS 12345678901, matrícula AA-00-BB";
+        let found = to_found(
+            text,
+            &[
+                finding("PT_NISS", 5, 16),
+                finding("PT_VEHICLE_REGISTRATION", 28, 36),
+                finding("PT_NIF", 0, 4),
+                finding("PT_POSTAL_CODE", 0, 4),
+                finding("PT_PHONE_NUMBER", 0, 4),
+            ],
+        );
+        let kinds: Vec<Kind> = found.iter().map(|f| f.kind).collect();
+        assert_eq!(
+            kinds,
+            [Kind::Id, Kind::Id, Kind::Nif, Kind::Postcode, Kind::Phone]
+        );
     }
 
     #[test]

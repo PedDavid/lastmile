@@ -138,6 +138,31 @@ and configuration (see Presidio's docs on
 [languages](https://microsoft.github.io/presidio/analyzer/languages/)), and set
 `presidio.image` and `presidio.language`.
 
+**A Portuguese analyzer.** An image built for Portuguese (Portuguese NLP model,
+and Presidio's Portuguese recognizers enabled) is used by setting the image, the
+language and the entities to ask for. Besides `PERSON` and `LOCATION`, the
+entity types of Presidio's Portuguese recognizers are understood:
+`PT_NIF`, `PT_PHONE_NUMBER` and `PT_POSTAL_CODE` become what the patterns
+already call them, and `PT_CITIZEN_CARD`, `PT_NISS`, `PT_PASSPORT`,
+`PT_SNS_NUMBER` and `PT_VEHICLE_REGISTRATION` become `‹ID_1›`.
+
+```yaml
+presidio:
+  enabled: true
+  image:
+    repository: ghcr.io/peddavid/presidio-analyzer
+    tag: pt-lab
+  language: pt
+  entities: PERSON,LOCATION,PT_NIF,PT_PHONE_NUMBER,PT_POSTAL_CODE,PT_CITIZEN_CARD,PT_NISS,PT_PASSPORT,PT_SNS_NUMBER,PT_VEHICLE_REGISTRATION
+  resources:
+    limits:
+      memory: 3Gi   # a larger model than the English one
+```
+
+List only the entity types the image supports (`GET /supportedentities?language=pt`
+on the analyzer lists them). An error from the analyzer shows as the page's
+*did not answer* notice.
+
 ### Helm
 
 ```yaml
