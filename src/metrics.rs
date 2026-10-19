@@ -10,6 +10,7 @@ use prometheus_client::metrics::MetricType;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::ConstGauge;
+use prometheus_client::metrics::info::Info;
 use prometheus_client::registry::Registry;
 
 use crate::db::messages::{self, MessageResult};
@@ -78,6 +79,14 @@ impl Metrics {
             "lastmile_llm_tokens",
             "Tokens used by the model that drafts rules, by kind (input, output)",
             llm_tokens.clone(),
+        );
+        registry.register(
+            "lastmile_build",
+            "The version of lastmile that is running",
+            Info::new(vec![(
+                "version".to_string(),
+                env!("CARGO_PKG_VERSION").to_string(),
+            )]),
         );
         registry.register_collector(Box::new(PackageCollector { db }));
         std::sync::Arc::new(Metrics {
