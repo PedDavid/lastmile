@@ -110,7 +110,7 @@
         {% endif %}
         <a class="btn" data-variant="outline" href="/packages/new?message={{ m.id }}">{% include "icons/plus.svg" %} Create package</a>
         {% if layout.admin && !m.purged %}
-        {% if llm_enabled %}<a class="btn" data-variant="outline" href="/rules/draft?message={{ m.id }}">{% include "icons/workflow.svg" %} Draft with a model</a>{% endif %}
+        {% if llm_enabled %}<a class="btn" data-variant="outline" href="/rules/draft?message={{ m.id }}">{% include "icons/workflow.svg" %} AI assist</a>{% endif %}
         <a class="btn" data-variant="outline" href="/rules/new?message={{ m.id }}">{% include "icons/workflow.svg" %} Build rule by hand</a>
         {% endif %}
         <form method="post" action="/inbox/{{ m.id }}/ignore" class="ms-auto">

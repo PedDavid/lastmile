@@ -1,6 +1,5 @@
-//! Drafting a rule with the model, from an inbox message: the admin sees
-//! the message redacted next to the original, can edit it, and nothing is
-//! sent until they click *Send*.
+//! AI assist: review redactions in place, with a per-user default.
+//! Redact and Back to original never send; only an explicit submit calls the model.
 
 use askama::Template;
 use axum::Form;
@@ -18,7 +17,7 @@ use super::{AppError, AppState};
 use crate::db::messages::{self, Message};
 use crate::db::{rules as rule_db, settings};
 use crate::ingest::MAX_TEXT;
-use crate::redact::{Household, Options, find_leak, redact, redact_known};
+use crate::redact::{Household, Options, RedactionPart, find_leak, redact, redact_known};
 use crate::rules::draft::{self, Request};
 
 fn llm_off() -> AppError {
@@ -34,9 +33,10 @@ struct DraftPage {
     sender: String,
     original: String,
     redacted: String,
-    counts: Vec<(String, usize)>,
+    parts: Vec<RedactionPart>,
+    parts_json: String,
     hint: String,
-    redact_codes: bool,
+    is_redacted: bool,
     host: String,
     model: String,
     household_empty: bool,
@@ -72,17 +72,32 @@ fn page(
     household: &Household,
     redacted: Option<String>,
     hint: String,
-    redact_codes: bool,
+    is_redacted: bool,
     error: String,
 ) -> Result<DraftPage, AppError> {
     let client = state.inner.llm.as_ref().ok_or_else(llm_off)?;
     let original = message.text().unwrap_or_default();
     // What the automatic redaction found, whatever has been edited since.
-    let auto = redact(&original, household, Options { redact_codes });
-    let counts = counts(&auto);
-    let redacted = redacted.unwrap_or(auto.text);
+    let auto = redact(&original, household, Options { redact_codes: true });
+    let redacted = redacted.unwrap_or_else(|| {
+        if is_redacted {
+            auto.text.clone()
+        } else {
+            original.clone()
+        }
+    });
+    let parts = if redacted == auto.text {
+        auto.parts
+    } else {
+        vec![RedactionPart {
+            original: String::new(),
+            text: redacted.clone(),
+            kind: String::new(),
+        }]
+    };
+    let parts_json = serde_json::to_string(&parts).expect("review parts serialize");
     Ok(DraftPage {
-        layout: Layout::new(state, session, jar, "Draft a rule"),
+        layout: Layout::new(state, session, jar, "AI assist"),
         message_id: message.id,
         channel: message.channel.label(),
         sender: message
@@ -92,18 +107,15 @@ fn page(
             .unwrap_or_default(),
         original,
         redacted,
-        counts,
+        parts,
+        parts_json,
         hint,
-        redact_codes,
+        is_redacted,
         host: client.host(),
         model: client.model().to_string(),
         household_empty: household.is_empty(),
         error,
     })
-}
-
-fn counts(r: &crate::redact::Redacted) -> Vec<(String, usize)> {
-    r.counts.iter().map(|(k, v)| (k.to_string(), *v)).collect()
 }
 
 pub async fn form(
@@ -113,6 +125,12 @@ pub async fn form(
     Query(q): Query<FormQuery>,
 ) -> Result<Response, AppError> {
     let (message, household) = load(&state, q.message).await?;
+    let sub = session.sub.clone();
+    let is_redacted = state
+        .inner
+        .db
+        .call(move |c| settings::redact_by_default(c, &sub))
+        .await?;
     let p = page(
         &state,
         &session,
@@ -121,7 +139,7 @@ pub async fn form(
         &household,
         None,
         String::new(),
-        false,
+        is_redacted,
         String::new(),
     )?;
     Ok(Html(p.render()?).into_response())
@@ -137,8 +155,10 @@ pub struct DraftForm {
     #[serde(default)]
     hint: String,
     #[serde(default)]
-    redact_codes: Option<String>,
-    /// `redact` (again, from the original) or `send`.
+    is_redacted: Option<String>,
+    #[serde(default)]
+    parts: String,
+    /// `redact`, `original`, or explicit `send`.
     #[serde(default)]
     action: String,
 }
@@ -153,7 +173,11 @@ pub async fn draft(
     session.check_csrf(&headers, form.csrf.as_deref())?;
     let client = state.inner.llm.as_ref().ok_or_else(llm_off)?;
     let (message, household) = load(&state, form.message_id).await?;
-    let redact_codes = form.redact_codes.is_some();
+    let is_redacted = match form.action.as_str() {
+        "redact" => true,
+        "original" => false,
+        _ => form.is_redacted.as_deref() == Some("1"),
+    };
     let hint = form.hint.trim().to_string();
     if hint.len() > 500 {
         return Err(AppError::BadRequest("the description is too long".into()));
@@ -162,7 +186,7 @@ pub async fn draft(
                 error: String,
                 status: StatusCode|
      -> Result<Response, AppError> {
-        let p = page(
+        let mut p = page(
             &state,
             &session,
             &jar,
@@ -170,12 +194,23 @@ pub async fn draft(
             &household,
             redacted,
             hint.clone(),
-            redact_codes,
+            is_redacted,
             error,
         )?;
+        // Preserve chip metadata after validation/model errors without ever forwarding it.
+        if form.action == "send"
+            && form.parts.len() <= MAX_TEXT * 8
+            && let Ok(parts) = serde_json::from_str::<Vec<RedactionPart>>(&form.parts)
+        {
+            let text: String = parts.iter().map(|p| p.text.as_str()).collect();
+            if text == p.redacted {
+                p.parts_json = serde_json::to_string(&parts).expect("review parts serialize");
+                p.parts = parts;
+            }
+        }
         Ok((status, Html(p.render()?)).into_response())
     };
-    // "Redact again" throws the edits away and starts from the original.
+    // Redact and Back to original are local review actions; neither calls the model.
     if form.action != "send" {
         return show(None, String::new(), StatusCode::OK);
     }
@@ -201,7 +236,7 @@ pub async fn draft(
             return show(
                 Some(redacted.clone()),
                 format!(
-                    "Not sent: the text still contains a household {}. Replace it (or use *Redact again*).",
+                    "Not sent: the text still contains a household {}. Hide it before submitting (or use Redact message).",
                     kind.label().to_lowercase()
                 ),
                 StatusCode::UNPROCESSABLE_ENTITY,

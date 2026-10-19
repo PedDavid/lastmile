@@ -26,6 +26,19 @@
   </div>
   {% endif %}
 
+  <form class="card" method="post" action="/settings/preferences">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <header><h2>AI assist</h2><p>Your preference for reviewing messages before drafting a rule.</p></header>
+    <section>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" role="switch" name="redact_by_default" value="1" {% if redact_by_default %}checked{% endif %}>
+        Redact by default
+      </label>
+      <p class="text-sm text-muted-foreground">Automatically hide personal details and delivery or pickup codes when opening AI assist. Nothing is sent until you submit.</p>
+    </section>
+    <footer class="justify-end"><button type="submit" class="btn">Save preferences</button></footer>
+  </form>
+
   <div class="card">
     <header>
       <h2>Devices</h2>
@@ -97,7 +110,7 @@
     </header>
     <section class="text-sm">
       {% if let Some(l) = llm %}
-      <p>On: <code>{{ l.model }}</code> at <code>{{ l.host }}</code>. A message is only sent after an admin has seen it redacted and clicked <em>Send</em>.</p>
+      <p>On: <code>{{ l.model }}</code> at <code>{{ l.host }}</code>. A message is only sent after an admin reviews it and clicks <em>Submit to AI</em> (or <em>Submit original</em>).</p>
       {% else %}
       <p class="text-muted-foreground">Off. Set <code>--llm-model</code> (and, for OpenAI, <code>--llm-api-key-file</code>) to let admins draft rules from inbox messages; see <code>docs/llm.md</code>, which also covers self-hosted models.</p>
       {% endif %}

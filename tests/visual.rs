@@ -331,3 +331,71 @@ async fn settings_household() {
         .unwrap();
     assert_screenshot(&ui.page, "settings-household").await;
 }
+
+#[tokio::test]
+#[ignore = "needs a Playwright browser: make visual"]
+async fn redaction_chips_can_be_revealed_and_selected_text_hidden() {
+    let ui = open("/rules/draft?message=6", &[]).await;
+    expect(ui.page.locator("[data-kind=CODE]").first())
+        .to_be_visible()
+        .await
+        .unwrap();
+    ui.page
+        .locator("[data-kind=CODE]")
+        .first()
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("[data-reveal-panel]"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    ui.page
+        .locator("[data-reveal-confirm]")
+        .click(None)
+        .await
+        .unwrap();
+    ui.page.evaluate_expression(r#"(() => {
+        const editor = document.querySelector('[data-redaction-editor]');
+        const input = document.querySelector('textarea[name=redacted]');
+        if (!input.value.includes('5527')) throw Error('Code was not revealed');
+        editor.focus();
+        const node = Array.from(editor.childNodes).find(n => n.nodeType === 3 && n.textContent.includes('Paack'));
+        const start = node.textContent.indexOf('Paack');
+        const range = document.createRange();
+        range.setStart(node, start); range.setEnd(node, start + 5);
+        const selection = window.getSelection();
+        selection.removeAllRanges(); selection.addRange(range);
+    })()"#).await.unwrap();
+    ui.page
+        .locator("[data-hide-selection]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("[data-kind=CUSTOM]"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    ui.page.evaluate_expression(r#"(() => {
+        const value = document.querySelector('textarea[name=redacted]').value;
+        if (!value.includes('‹CUSTOM_1›') || value.includes('Paack')) throw Error('Selection was not hidden');
+    })()"#).await.unwrap();
+    ui.page
+        .locator("button[value=original]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("button[value=redact]"))
+        .to_be_visible()
+        .await
+        .unwrap();
+    ui.page
+        .locator("button[value=redact]")
+        .click(None)
+        .await
+        .unwrap();
+    expect(ui.page.locator("[data-kind=CODE]").first())
+        .to_be_visible()
+        .await
+        .unwrap();
+}

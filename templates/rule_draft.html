@@ -1,75 +1,46 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex flex-col gap-6">
-  <a href="/inbox#message-{{ message_id }}" class="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&>svg]:size-4">
-    {% include "icons/chevron-left.svg" %} Inbox
-  </a>
+<div class="mx-auto flex max-w-3xl flex-col gap-6">
+  <a href="/inbox#message-{{ message_id }}" class="text-sm text-muted-foreground">‹ Inbox</a>
   <div>
-    <h1 class="text-2xl font-semibold tracking-tight">Draft a rule with a model</h1>
-    <p class="text-muted-foreground text-sm">The model sees only the redacted text on the right. Nothing is sent until you click <em>Send</em>: check it, and edit it if something personal is left.</p>
+    <h1 class="text-2xl font-semibold tracking-tight">AI assist</h1>
+    <p class="text-muted-foreground text-sm">Review the message before asking AI to draft a rule. Nothing is sent until you submit.</p>
   </div>
-
-  {% if !error.is_empty() %}
-  <div class="alert" data-variant="destructive" role="alert">
-    {% include "icons/triangle-alert.svg" %}
-    <h2>{{ error }}</h2>
-  </div>
-  {% endif %}
-
-  {% if household_empty %}
-  <div class="alert" role="status">
-    {% include "icons/info.svg" %}
-    <h2>No household values are set, so only what has a recognisable format is redacted (emails, phone numbers, postcodes, NIFs, IBANs, cards, URL tokens, greetings). Names and addresses need adding in <a class="underline underline-offset-4" href="/settings">Settings</a>.</h2>
-  </div>
-  {% endif %}
-
-  <form method="post" action="/rules/draft" class="flex flex-col gap-4">
+  {% if !error.is_empty() %}<div class="alert" data-variant="destructive" role="alert"><h2>{{ error }}</h2></div>{% endif %}
+  {% if household_empty %}<div class="alert" role="status"><h2>No household values are set.</h2><section>Automatic redaction can miss names and addresses. Add them in <a href="/settings" class="underline">Settings</a> and check the message before submitting.</section></div>{% endif %}
+  <form method="post" action="/rules/draft" class="card" data-redaction-form>
     <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
     <input type="hidden" name="message_id" value="{{ message_id }}">
-    <div class="grid gap-4 lg:grid-cols-2">
-      <div class="card">
-        <header>
-          <h2>Original</h2>
-          <p>{{ channel }}{% if !sender.is_empty() %} · from {{ sender }}{% endif %}. Stays here.</p>
-        </header>
-        <section>
-          <div class="message-text max-h-80">{{ original }}</div>
-        </section>
+    <input type="hidden" name="is_redacted" value="{% if is_redacted %}1{% else %}0{% endif %}">
+    <input type="hidden" name="parts" value="{{ parts_json }}" data-redaction-parts>
+    <header><h2>Message to send</h2><p>{% if is_redacted %}Review redactions. Click a chip to reveal its text, or select more text to hide.{% else %}Original message. Redact personal details and delivery or pickup codes before submitting.{% endif %}</p></header>
+    <section class="flex flex-col gap-4">
+      <p class="text-sm text-muted-foreground">{{ channel }}{% if !sender.is_empty() %} · from {{ sender }}{% endif %}</p>
+      <textarea name="redacted" rows="9" class="textarea w-full font-mono text-xs" spellcheck="false" aria-label="Redacted message">{{ redacted }}</textarea>
+      <div hidden data-redaction-editor role="textbox" aria-multiline="true" aria-label="Message to send" aria-describedby="redaction-help" tabindex="0">{% for part in parts %}{% if part.kind.is_empty() %}{{ part.text }}{% else %}<button type="button" contenteditable="false" class="redaction-chip" data-kind="{{ part.kind }}" data-original="{{ part.original }}" data-placeholder="{{ part.text }}" aria-label="Review {{ part.kind }} redaction">{{ part.kind }} hidden</button>{% endif %}{% endfor %}</div>
+      <div hidden data-redaction-tools class="flex flex-wrap gap-2">
+        <button type="button" class="btn" data-variant="outline" data-size="sm" data-hide-selection disabled>Hide selected text</button>
+        <span id="redaction-help" class="text-sm text-muted-foreground">Select text with your mouse or keyboard, then choose Hide selected text.</span>
       </div>
-      <div class="card">
-        <header>
-          <h2>Redacted: what is sent</h2>
-          <p>
-            {% if counts.is_empty() %}Nothing was replaced.{% else %}Replaced:
-            {% for (kind, n) in counts %}<span class="badge" data-variant="secondary">{{ n }} {{ kind }}</span> {% endfor %}{% endif %}
-          </p>
-        </header>
-        <section>
-          <textarea name="redacted" rows="9" class="textarea w-full font-mono text-xs" spellcheck="false" aria-label="Redacted message">{{ redacted }}</textarea>
-        </section>
+      <div hidden data-reveal-panel class="redaction-reveal" role="group" aria-label="Review hidden text">
+        <p data-reveal-value class="message-text"></p>
+        <button type="button" class="btn" data-variant="outline" data-reveal-confirm>Reveal in message sent to AI</button>
+        <button type="button" class="btn" data-variant="ghost" data-reveal-cancel>Keep hidden</button>
       </div>
-    </div>
-
-    <div class="card">
-      <section class="flex flex-col gap-4">
-        <div class="field">
-          <label for="hint">What is this message? <span class="text-muted-foreground">(optional, sent too)</span></label>
-          <input id="hint" name="hint" value="{{ hint }}" maxlength="500" placeholder="Paack, out for delivery today: the 4 digits are the code for the courier">
-        </div>
-        <label class="flex items-center gap-2 text-sm">
-          <input type="checkbox" class="input" name="redact_codes" value="1" {% if redact_codes %}checked{% endif %}>
-          Also hide the delivery or pickup code (use <em>Redact again</em> after ticking)
-        </label>
-        <p class="flex items-center gap-2 text-sm text-muted-foreground [&>svg]:size-4 [&>svg]:shrink-0">
-          {% include "icons/info.svg" %}
-          <span>Sent to <code>{{ model }}</code> at <code>{{ host }}</code>. Up to three more requests follow if the draft doesn't pass the checks here.</span>
-        </p>
-      </section>
-      <footer class="justify-between">
-        <button type="submit" name="action" value="redact" class="btn" data-variant="outline">Redact again</button>
-        <button type="submit" name="action" value="send" class="btn">{% include "icons/workflow.svg" %} Send and draft</button>
-      </footer>
-    </div>
+      <p data-redaction-status role="status" class="text-sm text-muted-foreground"></p>
+      <details><summary class="text-sm cursor-pointer">Compare with original</summary><div class="message-text">{{ original }}</div></details>
+      <div class="field"><label for="hint">Instructions for AI <span class="text-muted-foreground">(optional, sent too)</span></label><input id="hint" name="hint" value="{{ hint }}" maxlength="500" placeholder="Find the tracking number and delivery code"></div>
+      <p class="text-sm text-muted-foreground">Sent to <code>{{ model }}</code> at <code>{{ host }}</code>. Local checks may trigger up to three additional requests.</p>
+    </section>
+    <footer class="justify-end gap-2">
+      {% if is_redacted %}
+      <button type="submit" name="action" value="send" class="btn">Submit to AI</button>
+      <button type="submit" name="action" value="original" class="btn" data-variant="outline">Back to original</button>
+      {% else %}
+      <button type="submit" name="action" value="redact" class="btn">Redact message</button>
+      <button type="submit" name="action" value="send" class="btn" data-variant="outline">Submit original</button>
+      {% endif %}
+    </footer>
   </form>
 </div>
 {% endblock %}

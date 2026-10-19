@@ -59,6 +59,7 @@ struct SettingsPage {
     household: Option<HouseholdLines>,
     llm: Option<LlmInfo>,
     notice: &'static str,
+    redact_by_default: bool,
     tokens: Vec<TokenRow>,
     /// A token just created: shown once, never again.
     new_token: String,
@@ -74,10 +75,16 @@ async fn page(
 ) -> Result<Response, AppError> {
     let now = state.now();
     let sub = session.sub.clone();
-    let (list, household) = state
+    let (list, household, redact_by_default) = state
         .inner
         .db
-        .call(move |c| Ok((tokens::list(c, &sub)?, settings_db::household(c)?)))
+        .call(move |c| {
+            Ok((
+                tokens::list(c, &sub)?,
+                settings_db::household(c)?,
+                settings_db::redact_by_default(c, &sub)?,
+            ))
+        })
         .await?;
     let tokens = list
         .iter()
@@ -100,6 +107,7 @@ async fn page(
                 host: l.host(),
             }),
             notice,
+            redact_by_default,
             tokens,
             new_token,
             ingest_url: format!(
@@ -238,4 +246,29 @@ pub async fn revoke_token(
         return Err(AppError::NotFound("no such device".into()));
     }
     Ok(Redirect::to("/settings").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct PreferencesForm {
+    #[serde(rename = "_csrf")]
+    csrf: Option<String>,
+    redact_by_default: Option<String>,
+}
+
+pub async fn save_preferences(
+    State(state): State<AppState>,
+    User(session): User,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Form(form): Form<PreferencesForm>,
+) -> Result<Response, AppError> {
+    session.check_csrf(&headers, form.csrf.as_deref())?;
+    let sub = session.sub.clone();
+    let enabled = form.redact_by_default.is_some();
+    state
+        .inner
+        .db
+        .call(move |c| settings_db::set_redact_by_default(c, &sub, enabled))
+        .await?;
+    page(&state, &session, &jar, String::new(), "Preferences saved.").await
 }

@@ -1,0 +1,13 @@
+/* Review chips use labels as well as colors, including in dark mode. */
+[data-redaction-editor] { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 12rem; padding: 1rem; border: 1px solid var(--border); border-radius: .6rem; line-height: 2; }
+[data-redaction-editor]:focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+.redaction-chip { display: inline; border: 1px solid #b7adce; border-radius: .35rem; padding: .15rem .4rem; margin: 0 .1rem; color: #392461; background: #ece4fa; font: inherit; font-size: .85em; cursor: pointer; white-space: nowrap; }
+.redaction-chip[data-kind="ADDRESS"], .redaction-chip[data-kind="POSTCODE"] { color: #71351f; background: #ffeadb; border-color: #d4aa91; }
+.redaction-chip[data-kind="CODE"] { color: #194e59; background: #d9f1f4; border-color: #91bcc5; }
+.redaction-chip[data-kind="CUSTOM"] { color: #3b4c23; background: #e7efd9; border-color: #a6b88a; }
+.redaction-chip:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.redaction-reveal { border: 1px solid var(--border); border-radius: .6rem; padding: 1rem; }
+.redaction-reveal .message-text { margin-bottom: .75rem; }
+[hidden] { display: none !important; }
+.redaction-chip[data-kind="PHONE"] { color: #244969; background: #e1eefb; border-color: #a4bed8; }
+.redaction-chip[data-kind="EMAIL"] { color: #702b54; background: #f9e3ee; border-color: #d4a3bc; }
