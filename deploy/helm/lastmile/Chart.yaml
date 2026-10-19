@@ -2,8 +2,8 @@ apiVersion: v2
 name: lastmile
 description: The packages a household is expecting, and the codes to collect them
 type: application
-version: 0.2.0-exp.1
-appVersion: "0.2.0-exp.1"
+version: 0.2.0-exp.2
+appVersion: "0.2.0-exp.2"
 home: https://github.com/PedDavid/lastmile
 sources:
   - https://github.com/PedDavid/lastmile
