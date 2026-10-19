@@ -36,6 +36,8 @@ askama = "0.16"
 time = "0.3"
 flate2 = "1.1.10"
 similar = "3.2.0"
+chromiumoxide = { version = "0.9.1", default-features = false }
+futures = { version = "0.3.34", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 chrono = "0.4"

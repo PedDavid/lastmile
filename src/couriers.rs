@@ -6,6 +6,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+pub mod ctt;
+
 /// (format, courier name as shown).
 const FORMATS: &[(&str, &str)] = &[
     // UPU S10 numbers issued in Portugal: two letters, nine digits, PT.

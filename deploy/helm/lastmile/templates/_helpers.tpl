@@ -51,3 +51,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- .Values.presidio.url -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "lastmile.browserName" -}}
+{{- printf "%s-chromium" (include "lastmile.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* Its own name label, like the analyzer's: the app's Service must not select it. */}}
+{{- define "lastmile.browserSelectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-chromium" (include "lastmile.name" .) | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{/* Where the app finds the browser: the one this chart starts, or one that
+     already runs. Empty when there is none. */}}
+{{- define "lastmile.browserUrl" -}}
+{{- if .Values.browser.enabled -}}
+{{- printf "http://%s.%s.svc:%d" (include "lastmile.browserName" .) .Release.Namespace (int .Values.browser.port) -}}
+{{- else -}}
+{{- .Values.browser.url -}}
+{{- end -}}
+{{- end -}}
