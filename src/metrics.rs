@@ -38,6 +38,7 @@ pub struct Metrics {
     messages: Family<MessageLabels, Counter>,
     llm_requests: Family<ResultLabels, Counter>,
     llm_tokens: Family<KindLabels, Counter>,
+    analyzer_requests: Family<ResultLabels, Counter>,
 }
 
 impl Metrics {
@@ -79,12 +80,24 @@ impl Metrics {
             "Tokens used by the model that drafts rules, by kind (input, output)",
             llm_tokens.clone(),
         );
+        let analyzer_requests = Family::<ResultLabels, Counter>::default();
+        for result in ["ok", "error"] {
+            let _ = analyzer_requests.get_or_create(&ResultLabels {
+                result: result.into(),
+            });
+        }
+        registry.register(
+            "lastmile_analyzer_requests",
+            "Requests to the analyzer that suggests what to redact, by result",
+            analyzer_requests.clone(),
+        );
         registry.register_collector(Box::new(PackageCollector { db }));
         std::sync::Arc::new(Metrics {
             registry,
             messages,
             llm_requests,
             llm_tokens,
+            analyzer_requests,
         })
     }
 
@@ -100,6 +113,15 @@ impl Metrics {
                 .get_or_create(&KindLabels { kind: kind.into() })
                 .inc_by(n);
         }
+    }
+
+    /// One request to the analyzer.
+    pub fn analyzer_call(&self, ok: bool) {
+        self.analyzer_requests
+            .get_or_create(&ResultLabels {
+                result: if ok { "ok" } else { "error" }.into(),
+            })
+            .inc();
     }
 
     pub fn message(&self, channel: Channel, result: MessageResult) {

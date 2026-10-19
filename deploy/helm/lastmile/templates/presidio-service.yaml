@@ -1,0 +1,19 @@
+{{- if .Values.presidio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lastmile.presidioName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lastmile.presidioSelectorLabels" . | nindent 4 }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  # Cluster-internal only: it is sent the original messages.
+  type: ClusterIP
+  selector:
+    {{- include "lastmile.presidioSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.presidio.port }}
+      targetPort: http
+{{- end }}

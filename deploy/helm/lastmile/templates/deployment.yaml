@@ -84,6 +84,19 @@ spec:
               value: /etc/lastmile/llm/{{ .Values.llm.apiKey.key }}
             {{- end }}
             {{- end }}
+            {{- $presidio := include "lastmile.presidioUrl" . }}
+            {{- if $presidio }}
+            - name: LASTMILE_PRESIDIO_URL
+              value: {{ $presidio | quote }}
+            - name: LASTMILE_PRESIDIO_LANGUAGE
+              value: {{ .Values.presidio.language | quote }}
+            - name: LASTMILE_PRESIDIO_ENTITIES
+              value: {{ .Values.presidio.entities | quote }}
+            - name: LASTMILE_PRESIDIO_SCORE
+              value: {{ .Values.presidio.score | quote }}
+            - name: LASTMILE_PRESIDIO_TIMEOUT
+              value: {{ .Values.presidio.timeout | quote }}
+            {{- end }}
             {{- if .Values.logJson }}
             - name: LASTMILE_LOG_JSON
               value: "true"

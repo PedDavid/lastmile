@@ -32,6 +32,33 @@ llm:
     existingSecret: ""
     key: api-key
 
+# A Presidio analyzer that finds names and places in a message beyond the
+# household values (docs/llm.md). Off by default. It is sent the original
+# message, so keep it in the cluster: `enabled` starts one with this release,
+# or `url` points at one that already runs.
+presidio:
+  enabled: false
+  url: ""
+  # The stock image knows English only (spaCy en_core_web_lg); another
+  # language needs your own image and NLP configuration.
+  language: en
+  entities: PERSON,LOCATION
+  score: "0.5"
+  timeout: 10s
+  # Used when `enabled`.
+  image:
+    repository: mcr.microsoft.com/presidio-analyzer
+    tag: 2.2.362
+    pullPolicy: IfNotPresent
+  port: 3000
+  workers: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+
 # Key encrypting session cookies. Generated once and kept across upgrades
 # unless an existing Secret (with key `cookie-key`, >= 64 bytes) is given.
 cookieKey:

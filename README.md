@@ -34,6 +34,9 @@ turn them into packages):
 - **Any OpenAI-compatible model**: OpenAI (Chat Completions or the Responses
   API) or a self-hosted server (Ollama, vLLM, llama.cpp, LM Studio), through
   `--llm-model` and `--llm-base-url`.
+- **Optionally, a Presidio analyzer** (`--presidio-url`, or `presidio.enabled`
+  in the chart) finds names and places the household list doesn't have, in the
+  same placeholders.
 - **Samples are stored redacted** (unless you choose to keep the original).
 - **Share rules** as a `rule/v1` document: copy the YAML, a one-line blob for
   chat apps, or download a `.lastmile.yaml`. Samples leave only redacted.
@@ -88,6 +91,7 @@ Computed from the database on every scrape.
 | `lastmile_messages_total{channel, result}` | Messages received |
 | `lastmile_rules{origin, enabled}` | |
 | `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | Requests to and tokens used by the model that drafts rules |
+| `lastmile_analyzer_requests_total{result}` | Requests to the analyzer that suggests what to redact |
 
 ## Kubernetes
 

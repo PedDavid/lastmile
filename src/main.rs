@@ -39,7 +39,13 @@ async fn main() -> anyhow::Result<()> {
     if let Some(llm) = &llm {
         info!(model = llm.model(), host = %llm.host(), "rule drafting is on");
     }
-    let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key).with_llm(llm);
+    let analyzer = lastmile::analyzer::Client::from_config(&cfg.analyzer)?;
+    if let Some(analyzer) = &analyzer {
+        info!(host = %analyzer.host(), "the analyzer suggests what to redact");
+    }
+    let state = AppState::new(cfg.clone(), db.clone(), auth, cookie_key)
+        .with_llm(llm)
+        .with_analyzer(analyzer);
     let ops = web::ops_router(db, state.inner.metrics.clone());
     let app = web::router(state);
 

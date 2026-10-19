@@ -16,6 +16,13 @@
   </div>
   {% endif %}
 
+  {% if !analyzer_warning.is_empty() %}
+  <div class="alert" role="status">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>{{ analyzer_warning }}</h2>
+  </div>
+  {% endif %}
+
   {% if household_empty %}
   <div class="alert" role="status">
     {% include "icons/info.svg" %}
@@ -64,6 +71,12 @@
           {% include "icons/info.svg" %}
           <span>Sent to <code>{{ model }}</code> at <code>{{ host }}</code>. Up to three more requests follow if the draft doesn't pass the checks here.</span>
         </p>
+        {% if !analyzer.is_empty() %}
+        <p class="flex items-center gap-2 text-sm text-muted-foreground [&>svg]:size-4 [&>svg]:shrink-0">
+          {% include "icons/info.svg" %}
+          <span>Names and places were looked for by the analyzer at <code>{{ analyzer }}</code>, which was sent the original.</span>
+        </p>
+        {% endif %}
       </section>
       <footer class="justify-between">
         <button type="submit" name="action" value="redact" class="btn" data-variant="outline">Redact again</button>
