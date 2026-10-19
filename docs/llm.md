@@ -5,7 +5,7 @@ to **write a rule**, from one message no rule matched; a person reviews and
 saves the rule, and from then on it is plain, local pattern matching.
 
 Drafting is off until a model is configured. It then shows up for admins as
-*Draft with a model* on inbox messages.
+*AI assist* on inbox messages.
 
 ## What is sent
 
@@ -17,11 +17,21 @@ Drafting is off until a model is configured. It then shows up for admins as
    tokens and query values of URLs (the host stays), and the name in a
    greeting (*Olá Ana*). They become numbered placeholders that keep the text's
    shape: `‹NAME_1›`, `‹ADDRESS_1›`, `‹PHONE_1›`.
-   Tracking numbers, delivery and pickup codes, shop and courier names and
-   dates stay: they are what the rule has to find. Tick *also hide the code* to
-   replace the code with `‹CODE:dddd›`.
-2. **You see it first.** The draft page shows the original next to the redacted
-   text, which you can edit. Nothing is sent until you click *Send and draft*.
+   Delivery and pickup codes are hidden in the same pass, using shape-preserving
+   placeholders such as `‹CODE:dddd›`. Tracking numbers, courier names and dates
+   stay visible so the model can write a useful rule.
+2. **You see it first.** *Settings → AI assist → Redact by default* is a
+   per-user preference, on by default. When on, AI assist opens the redacted
+   preview with **Submit to AI** as the primary action and **Back to original**
+   as the secondary action. When off, it opens the original with **Redact
+   message** as the primary action and **Submit original** as the secondary.
+   Redacting or going back never contacts the model. Colored, labeled chips
+   show hidden passages: click one to inspect and reveal that occurrence.
+   Select text with the mouse or keyboard and choose **Hide selected text** to
+   hide anything automatic redaction missed. The original is available for
+   comparison. Without JavaScript, the text remains editable in a textarea.
+   Only the reviewed message and optional instructions are submitted to AI;
+   chip originals stay local to the app and are never part of the model request.
 3. **A last check.** Whatever is about to be sent is scanned once more for the
    household's values: if one is in it (you typed it back, or it was spelled in
    a way the patterns missed), the request is refused.

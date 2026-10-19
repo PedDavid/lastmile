@@ -165,6 +165,7 @@ impl From<askama::Error> for AppError {
 #[derive(RustEmbed)]
 #[folder = "assets/"]
 #[include = "dist/*"]
+#[include = "redaction.css"]
 #[include = "js/*"]
 #[include = "vendor/htmx/*.js"]
 #[include = "icons/*"]
@@ -311,6 +312,7 @@ pub fn router(state: AppState) -> Router {
             post(rules::delete_sample),
         )
         .route("/settings", get(settings::settings))
+        .route("/settings/preferences", post(settings::save_preferences))
         .route("/settings/household", post(settings::save_household))
         .route("/settings/tokens", post(settings::create_token))
         .route("/settings/tokens/{id}/revoke", post(settings::revoke_token))

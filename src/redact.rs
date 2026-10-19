@@ -137,6 +137,15 @@ pub struct Redacted {
     pub text: String,
     /// Distinct placeholders used, by kind (for showing what was replaced).
     pub counts: BTreeMap<&'static str, usize>,
+    pub parts: Vec<RedactionPart>,
+}
+
+/// A local review segment. Original values must never be included in model requests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionPart {
+    pub original: String,
+    pub text: String,
+    pub kind: String,
 }
 
 struct Span {
@@ -538,9 +547,16 @@ fn render(text: &str, accepted: &[Span]) -> Redacted {
     let mut next: BTreeMap<Kind, usize> = BTreeMap::new();
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
+    let mut parts = Vec::new();
     for s in accepted {
+        parts.push(RedactionPart {
+            original: String::new(),
+            text: text[at..s.start].into(),
+            kind: String::new(),
+        });
         out.push_str(&text[at..s.start]);
         at = s.end;
+        let placeholder_start = out.len();
         if s.kind == Kind::Code {
             let class: String = text[s.start..s.end]
                 .chars()
@@ -551,22 +567,36 @@ fn render(text: &str, accepted: &[Span]) -> Redacted {
                 })
                 .collect();
             out.push_str(&format!("‹CODE:{class}›"));
-            continue;
+        } else {
+            let n = *numbers.entry((s.kind, s.key.clone())).or_insert_with(|| {
+                let n = next.entry(s.kind).or_default();
+                *n += 1;
+                *n
+            });
+            out.push_str(&format!("‹{}_{n}›", s.kind.label()));
         }
-        let n = *numbers.entry((s.kind, s.key.clone())).or_insert_with(|| {
-            let n = next.entry(s.kind).or_default();
-            *n += 1;
-            *n
+        parts.push(RedactionPart {
+            original: text[s.start..s.end].into(),
+            text: out[placeholder_start..].into(),
+            kind: s.kind.label().into(),
         });
-        out.push_str(&format!("‹{}_{n}›", s.kind.label()));
     }
     out.push_str(&text[at..]);
+    parts.push(RedactionPart {
+        original: String::new(),
+        text: text[at..].into(),
+        kind: String::new(),
+    });
 
     let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
     for (kind, _) in numbers.keys() {
         *counts.entry(kind.label()).or_default() += 1;
     }
-    Redacted { text: out, counts }
+    Redacted {
+        text: out,
+        counts,
+        parts,
+    }
 }
 
 /// Redacts `text`.
@@ -729,6 +759,32 @@ mod tests {
         );
         assert_eq!(r("Caro Rui Costa:"), "Caro ‹NAME_1›:");
         assert_eq!(r("Olá, a sua encomenda"), "Olá, a sua encomenda");
+    }
+
+    #[test]
+    fn review_segments_reconstruct_the_message_without_losing_unicode_or_repeats() {
+        let original = "Olá Ana. Código 482913. Ana, PIN 7a3k";
+        let h = Household {
+            names: vec!["Ana".into()],
+            ..Default::default()
+        };
+        let r = redact(original, &h, Options { redact_codes: true });
+        let preview: String = r.parts.iter().map(|p| p.text.as_str()).collect();
+        let restored: String = r
+            .parts
+            .iter()
+            .map(|p| {
+                if p.kind.is_empty() {
+                    p.text.as_str()
+                } else {
+                    p.original.as_str()
+                }
+            })
+            .collect();
+        assert_eq!(preview, r.text);
+        assert_eq!(restored, original);
+        assert_eq!(r.parts.iter().filter(|p| p.kind == "CODE").count(), 2);
+        assert!(!r.text.contains("482913"));
     }
 
     #[test]

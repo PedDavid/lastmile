@@ -116,7 +116,10 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
             .unwrap(),
     )
     .await;
-    assert!(html.contains("Original"), "{html}");
+    assert!(html.contains("Compare with original"), "{html}");
+    assert!(html.contains("Back to original"), "{html}");
+    assert!(html.contains("Submit to AI"), "{html}");
+    assert!(html.contains("‹CODE:dddd›"), "{html}");
     // The original is shown, the redaction is what the textarea holds.
     assert!(html.contains("Olá Ana Ferreira"), "{html}");
     assert!(
@@ -126,7 +129,7 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
     assert!(html.contains("test-model"), "{html}");
     assert!(server.received_requests().await.unwrap().is_empty());
 
-    // "Redact again" with codes ticked hides the delivery code too.
+    // One redaction action hides personal details and codes together.
     let html = body(
         h.app
             .clone()
@@ -137,7 +140,6 @@ async fn the_draft_page_shows_what_would_be_sent_and_sends_nothing() {
                     ("_csrf", "csrf-token"),
                     ("message_id", "1"),
                     ("action", "redact"),
-                    ("redact_codes", "1"),
                 ],
             ))
             .await
@@ -175,6 +177,10 @@ async fn sending_drafts_a_rule_and_leaks_nothing() {
                 ("action", "send"),
                 ("redacted", &redacted),
                 ("hint", "Paack out for delivery, the 4 digits are the code"),
+                (
+                    "parts",
+                    r#"[{"original":"LOCAL_ONLY_SECRET","text":"ignored","kind":"CUSTOM"}]"#,
+                ),
             ],
         ))
         .await
@@ -214,6 +220,8 @@ async fn sending_drafts_a_rule_and_leaks_nothing() {
         "the tracking number is what the rule reads"
     );
     assert!(sent.contains("the 4 digits are the code"));
+    assert!(!sent.contains("5527"));
+    assert!(!sent.contains("LOCAL_ONLY_SECRET"));
     assert!(
         requests[0].headers.get("authorization").is_none(),
         "no key configured"
@@ -714,4 +722,135 @@ async fn a_rule_is_exported_with_redacted_samples_in_both_forms() {
     let html = body(h.app.oneshot(multipart(&admin, &file, None)).await.unwrap()).await;
     assert!(html.contains("passes"), "{html}");
     assert!(!html.contains("fails"), "{html}");
+}
+
+#[tokio::test]
+async fn redaction_preference_is_per_user_and_review_actions_never_send() {
+    let server = mock_model(good_draft()).await;
+    let (h, admin) = setup(&server).await;
+    // CSRF is required even for a personal preference.
+    let res = h
+        .app
+        .clone()
+        .oneshot(form("/settings/preferences", &admin, &[]))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/settings/preferences",
+            &admin,
+            &[("_csrf", "csrf-token")],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        !h.db
+            .blocking(|c| settings::redact_by_default(c, "u1"))
+            .unwrap()
+    );
+    assert!(
+        h.db.blocking(|c| settings::redact_by_default(c, "u2"))
+            .unwrap()
+    );
+    let html = body(
+        h.app
+            .clone()
+            .oneshot(get("/rules/draft?message=1", &admin))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(html.contains("Submit original"));
+    assert!(html.contains("Redact message"));
+    assert!(!html.contains("‹CODE:dddd›"));
+    for action in ["redact", "original"] {
+        let html = body(
+            h.app
+                .clone()
+                .oneshot(form(
+                    "/rules/draft",
+                    &admin,
+                    &[
+                        ("_csrf", "csrf-token"),
+                        ("message_id", "1"),
+                        ("action", action),
+                    ],
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(html.contains("Back to original"), action == "redact");
+        assert_eq!(html.contains("‹CODE:dddd›"), action == "redact");
+        assert_eq!(html.contains("Submit original"), action == "original");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/settings/preferences",
+            &admin,
+            &[("_csrf", "csrf-token"), ("redact_by_default", "1")],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        h.db.blocking(|c| settings::redact_by_default(c, "u1"))
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn revealed_household_values_are_blocked_and_custom_chips_survive_errors() {
+    let server = mock_model(good_draft()).await;
+    let (h, admin) = setup(&server).await;
+    let text = "Ana Ferreira ‹CUSTOM_1›";
+    let parts = serde_json::json!([
+        {"original":"", "text":"Ana Ferreira ", "kind":""},
+        {"original":"private note", "text":"‹CUSTOM_1›", "kind":"CUSTOM"}
+    ])
+    .to_string();
+    let res = h
+        .app
+        .clone()
+        .oneshot(form(
+            "/rules/draft",
+            &admin,
+            &[
+                ("_csrf", "csrf-token"),
+                ("message_id", "1"),
+                ("action", "send"),
+                ("is_redacted", "1"),
+                ("redacted", text),
+                ("parts", &parts),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body(res).await;
+    assert!(html.contains("Not sent:"));
+    assert!(html.contains("data-original=\"private note\""));
+    assert!(html.contains("‹CUSTOM_1›"));
+    assert!(html.contains("Back to original"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn redaction_styles_and_script_are_served() {
+    let h = harness();
+    for (path, expected) in [
+        ("/assets/redaction.css", ".redaction-chip"),
+        ("/assets/js/redaction.js", "data-hide-selection"),
+    ] {
+        let res = h.app.clone().oneshot(get(path, "")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(body(res).await.contains(expected));
+    }
 }
