@@ -184,6 +184,10 @@ trait Courier: Send + Sync {
   descriptions to the six states in a table with tests. Tracking numbers in
   the UPU S10 format (`[A-Z]{2}\d{9}[A-Z]{2}`), plus CTT Expresso's own
   formats (collect from samples).
+- **Implemented, experimental:** the CTT adapter reads the tracking page in a
+  headless Chromium, because the page is a web app with nothing in its HTML
+  (`src/browser.rs`, `src/couriers/ctt.rs`, `src/tracking.rs`; see
+  `docs/couriers.md`). The chart can start the browser (`browser.enabled`).
 - **Paack.** No public API. Its messages carry a tracking link. **Spike:**
   check whether the tracking page loads a JSON endpoint that can be called
   with the token from the link. If not, Paack is message-only: the status
@@ -381,6 +385,7 @@ Served on `:9090/metrics` with `/healthz` and `/readyz`, as in the other apps.
 | `lastmile_rules{origin, enabled}` | |
 | `lastmile_llm_requests_total{result}`, `lastmile_llm_tokens_total{kind}` | |
 | `lastmile_analyzer_requests_total{result}` | |
+| `lastmile_courier_checks_total{courier,result}` | |
 
 Shipped alert rules: `PackageWaitingForPickup` (ready for more than 3 days,
 CTT holds items for a limited time), `PackagePickupEnding`,

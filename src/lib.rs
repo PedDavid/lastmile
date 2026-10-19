@@ -1,4 +1,5 @@
 pub mod analyzer;
+pub mod browser;
 pub mod config;
 pub mod couriers;
 pub mod db;
@@ -11,4 +12,5 @@ pub mod model;
 pub mod redact;
 pub mod rules;
 pub mod sweep;
+pub mod tracking;
 pub mod web;

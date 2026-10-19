@@ -1,0 +1,87 @@
+{{- if .Values.browser.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lastmile.browserName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lastmile.browserSelectorLabels" . | nindent 4 }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # Stateless: it opens a page when asked and closes it.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lastmile.browserSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lastmile.browserSelectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "lastmile.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chromium
+          image: "{{ .Values.browser.image.repository }}:{{ .Values.browser.image.tag }}"
+          imagePullPolicy: {{ .Values.browser.image.pullPolicy }}
+          env:
+            # Chromium writes its font cache under $HOME.
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: cdp
+              containerPort: {{ .Values.browser.port }}
+          readinessProbe:
+            httpGet:
+              path: /json/version
+              port: cdp
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /json/version
+              port: cdp
+            periodSeconds: 30
+            failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.browser.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Chromium needs more shared memory than a container gets.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

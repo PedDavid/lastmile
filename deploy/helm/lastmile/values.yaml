@@ -59,6 +59,29 @@ presidio:
     limits:
       memory: 2Gi
 
+# A headless Chromium that reads couriers' tracking pages (docs/couriers.md),
+# which are web apps with nothing in their HTML. Off by default. With it on,
+# active CTT packages are checked every `interval`. `enabled` starts one with
+# this release (reachable only inside the cluster), or `url` points at a
+# DevTools endpoint that already runs.
+browser:
+  enabled: false
+  url: ""
+  interval: 2h
+  timeout: 60s
+  # Used when `enabled`.
+  image:
+    repository: chromedp/headless-shell
+    tag: 156.0.8078.36
+    pullPolicy: IfNotPresent
+  port: 9222
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
 # Key encrypting session cookies. Generated once and kept across upgrades
 # unless an existing Secret (with key `cookie-key`, >= 64 bytes) is given.
 cookieKey:
