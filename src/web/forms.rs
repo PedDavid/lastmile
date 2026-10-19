@@ -484,6 +484,25 @@ pub async fn unarchive(
     archive_as(state, session, headers, id, form, false).await
 }
 
+pub async fn delete(
+    State(state): State<AppState>,
+    User(session): User,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<CsrfOnly>,
+) -> Result<Response, AppError> {
+    session.check_csrf(&headers, form.csrf.as_deref())?;
+    let found = state
+        .inner
+        .db
+        .call(move |c| packages::delete(c, id))
+        .await?;
+    if !found {
+        return Err(AppError::NotFound(format!("no package {id}")));
+    }
+    Ok(Redirect::to("/").into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

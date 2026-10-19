@@ -284,6 +284,7 @@ pub fn router(state: AppState) -> Router {
         .route("/packages/{id}/status", post(forms::set_status))
         .route("/packages/{id}/archive", post(forms::archive))
         .route("/packages/{id}/unarchive", post(forms::unarchive))
+        .route("/packages/{id}/delete", post(forms::delete))
         .route("/inbox", get(inbox::inbox))
         .route("/inbox/paste", post(inbox::paste))
         .route(
