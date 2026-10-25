@@ -266,15 +266,25 @@ impl CompiledRule {
 }
 
 /// Reads `2026-10-21`, `21/10/2026`, `21-10-2026`, `21.10.2026` or `21/10`
-/// (the year the message was sent; the next one if that day is long past).
+/// (the year the message was sent; the next one if that day is long past),
+/// or `hoje`, `amanhã` and `ontem` relative to the day the message was sent.
 pub fn parse_date(value: &str, sent_at: Timestamp) -> Option<Date> {
     let value = value.trim();
     if let Ok(d) = value.parse::<Date>() {
         return Some(d);
     }
+    let sent = sent_at.to_zoned(jiff::tz::TimeZone::UTC).date();
+    let days = match value.to_lowercase().as_str() {
+        "hoje" => Some(0),
+        "amanhã" | "amanha" => Some(1),
+        "ontem" => Some(-1),
+        _ => None,
+    };
+    if let Some(days) = days {
+        return sent.checked_add(jiff::Span::new().days(days)).ok();
+    }
     let parts: Vec<&str> = value.split(['/', '-', '.']).collect();
     let num = |s: &str| s.parse::<i16>().ok();
-    let sent = sent_at.to_zoned(jiff::tz::TimeZone::UTC).date();
     match parts.as_slice() {
         [d, m, y] => {
             let y = num(y)?;
@@ -494,5 +504,10 @@ mod tests {
         assert_eq!(d("05/01").as_deref(), Some("2027-01-05"));
         assert_eq!(d("31/02/2026"), None);
         assert_eq!(d("tomorrow"), None);
+        let sent = d("hoje").unwrap();
+        assert_eq!(d("Hoje ").as_deref(), Some(sent.as_str()));
+        assert!(d("amanhã").unwrap() > sent);
+        assert!(d("amanha").unwrap() > sent);
+        assert!(d("ontem").unwrap() < sent);
     }
 }
